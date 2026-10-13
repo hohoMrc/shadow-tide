@@ -504,6 +504,9 @@ const ENEMY_TYPES = {
   splitter: { r: 15, hp: 22,  speed: 58,  dmg: 10, xp: 2,  color: '#4f7a5b', ai: 'split' },
   mite:     { r: 7,  hp: 4,   speed: 115, dmg: 5,  xp: 1,  color: '#6fa37f' },
   spitter:  { r: 12, hp: 14,  speed: 64,  dmg: 8,  xp: 2,  color: '#3f8c7a', ai: 'spit' },
+  // 冰影：一次射 3 發扇形冰晶，打中會減速
+  frost:    { r: 13, hp: 20,  speed: 60,  dmg: 8,  xp: 2,  color: '#7fb4e0', ai: 'spit',
+              shot: { count: 3, spread: 0.28, speed: 200, cd: 2.2, slow: true } },
   charger:  { r: 14, hp: 24,  speed: 50,  dmg: 14, xp: 2,  color: '#4f86b0', ai: 'charge' },
   elite:    { r: 30, hp: 450, speed: 52,  dmg: 25, xp: 25, color: '#a8324f', elite: true },
   boss:     { r: 46, hp: 1,   speed: 70,  dmg: 30, xp: 0,  color: '#2a1d3d', boss: true, ai: 'boss' },
@@ -528,13 +531,13 @@ const STAGES = [
     bg: '#09110e', decor: 'tree', ink: '#16261f', ink2: '#1d3329', colors: { wisp: '#3f6b5a' },
     mix: [['wisp', 1, 0], ['spitter', 0.35, 0], ['runner', 0.3, 30], ['brute', 0.3, 60]],
     boss: { name: '樹魔', hp: 32000, color: '#1a2b1f', speed: 50, attacks: [['spray', 2.5], ['summon', 7]] } },
-  { name: '冰原', intro: '衝影出沒：蓄力後會直線衝刺',
+  { name: '冰原', intro: '冰影的冰晶會讓你變慢，衝影會蓄力衝刺',
     bg: '#0b1220', decor: 'ice', ink: '#22344d', ink2: '#18263b', colors: { wisp: '#4f6a94', brute: '#5a5f94' },
-    mix: [['wisp', 1, 0], ['charger', 0.4, 0], ['brute', 0.35, 30]],
-    boss: { name: '霜巨人', hp: 55000, color: '#25385a', speed: 45, r: 58, attacks: [['slam', 2.2], ['spray', 5]] } },
+    mix: [['wisp', 1, 0], ['frost', 0.35, 0], ['charger', 0.4, 0], ['brute', 0.35, 30]],
+    boss: { name: '霜巨人', hp: 55000, color: '#25385a', speed: 45, r: 58, iceShots: true, attacks: [['slam', 2.2], ['spray', 4]] } },
   { name: '血月', intro: '所有影子都來了',
     bg: '#150a0e', decor: 'blood', ink: '#33161d', ink2: '#261117', colors: { wisp: '#7a3f4f' },
-    mix: [['wisp', 1, 0], ['runner', 0.3, 0], ['splitter', 0.3, 0], ['spitter', 0.25, 0], ['charger', 0.25, 0], ['brute', 0.35, 0]],
+    mix: [['wisp', 1, 0], ['runner', 0.3, 0], ['splitter', 0.3, 0], ['spitter', 0.25, 0], ['frost', 0.2, 0], ['charger', 0.25, 0], ['brute', 0.35, 0]],
     boss: { name: '夜之母', hp: 75000, color: '#3a0f1f', r: 54, attacks: [['dash', 3.5], ['spray', 3], ['slam', 4], ['summon', 8]] } },
 ];
 
@@ -625,8 +628,10 @@ function update(dt) {
 
   // --- 玩家移動 ---
   const mv = readMove();
-  P.x += mv.x * P.speed * P.moveMul * dt;
-  P.y += mv.y * P.speed * P.moveMul * dt;
+  P.slowT = Math.max(0, (P.slowT || 0) - dt);
+  const speed = P.speed * P.moveMul * (P.slowT > 0 ? 0.55 : 1);
+  P.x += mv.x * speed * dt;
+  P.y += mv.y * speed * dt;
   if (mv.x || mv.y) { P.faceX = mv.x; P.faceY = mv.y; }
   P.iframe -= dt;
   P.hp = Math.min(P.maxHp, P.hp + P.regen * dt);
@@ -787,15 +792,18 @@ function updateEnemies(dt) {
   }
 }
 
-// 吐影：保持 200～260 的距離繞著你走，定時吐一發子彈
+// 吐影／冰影：保持 200～260 的距離繞著你走，定時射擊（冰影是三發扇形、會減速）
+const DEFAULT_SHOT = { count: 1, spread: 0, speed: 170, cd: 2.6, slow: false };
 function spitterAI(e, dt, d, mv) {
   const aim = Math.atan2(mv.y, mv.x);   // 先記下朝向玩家的角度，下面會改掉移動方向
   if (d < 200) { mv.x = -mv.x; mv.y = -mv.y; }
   else if (d < 260) { const t = mv.x; mv.x = -mv.y; mv.y = t; mv.sp *= 0.6; }
+  const S = e.shot || DEFAULT_SHOT;
   e.fire = (e.fire ?? rand(1, 2.5)) - dt;
   if (e.fire <= 0 && d < 420) {
-    e.fire = 2.6;
-    enemyShot(e.x, e.y, aim, 170, 8 + game.stage * 2);
+    e.fire = S.cd;
+    for (let i = 0; i < S.count; i++)
+      enemyShot(e.x, e.y, aim + (i - (S.count - 1) / 2) * S.spread, S.speed, 8 + game.stage * 2, S.slow);
   }
 }
 
@@ -852,7 +860,8 @@ const BOSS_ATTACKS = {
   spray(e, mv, enraged) {
     const n = enraged ? 18 : 14;
     e.sprayRot += 0.3;
-    for (let i = 0; i < n; i++) enemyShot(e.x, e.y, e.sprayRot + i / n * Math.PI * 2, 165, 10 + game.stage * 2);
+    const ice = !!STAGES[game.stage].boss.iceShots;
+    for (let i = 0; i < n; i++) enemyShot(e.x, e.y, e.sprayRot + i / n * Math.PI * 2, 165, 10 + game.stage * 2, ice);
   },
   slam() {
     const P = game.player;
@@ -864,16 +873,20 @@ const BOSS_ATTACKS = {
 // ============================================================
 //  敵方子彈與重擊落點
 // ============================================================
-function enemyShot(x, y, a, speed, dmg) {
+function enemyShot(x, y, a, speed, dmg, slow = false) {
   if (game.shots.length > 300) return;
-  game.shots.push({ x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, r: 6, dmg, life: 4 });
+  game.shots.push({ x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, r: 6, dmg, life: 4, slow });
 }
 
 function updateHazards(dt) {
   const P = game.player;
   for (const s of game.shots) {
     s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
-    if (Math.hypot(s.x - P.x, s.y - P.y) < s.r + P.r && P.iframe <= 0) { damagePlayer(s.dmg); s.life = 0; }
+    if (Math.hypot(s.x - P.x, s.y - P.y) < s.r + P.r && P.iframe <= 0) {
+      damagePlayer(s.dmg);
+      if (s.slow) P.slowT = 1.5;          // 冰晶：減速 1.5 秒
+      s.life = 0;
+    }
   }
   game.shots = game.shots.filter(s => s.life > 0);
   for (const z of game.zones) {
@@ -1531,6 +1544,16 @@ function render() {
 
   // 敵方子彈：紅色帶光暈，和自己的暖黃色光彈分得開
   for (const b of game.shots) {
+    if (b.slow) {   // 冰晶：沿飛行方向的藍白菱形
+      const a = Math.atan2(b.vy, b.vx);
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(a);
+      ctx.fillStyle = 'rgba(160,215,255,.3)';
+      ctx.beginPath(); ctx.arc(0, 0, b.r * 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#e4f4ff';
+      ctx.beginPath(); ctx.moveTo(b.r * 1.8, 0); ctx.lineTo(0, b.r * 0.7); ctx.lineTo(-b.r * 1.2, 0); ctx.lineTo(0, -b.r * 0.7); ctx.fill();
+      ctx.restore();
+      continue;
+    }
     ctx.fillStyle = 'rgba(255,93,115,.3)';
     ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 2, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#ff8fa3';
@@ -1544,6 +1567,11 @@ function render() {
     // 手上的燈（朝移動方向）
     ctx.fillStyle = '#ffc857';
     ctx.beginPath(); ctx.arc(P.x + P.faceX * 15, P.y + P.faceY * 15, 5, 0, Math.PI * 2); ctx.fill();
+  }
+  // 被冰晶減速時，身上一圈冰藍
+  if (P.slowT > 0) {
+    ctx.strokeStyle = `rgba(160,215,255,${Math.min(1, P.slowT)})`; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(P.x, P.y, P.r + 5, 0, Math.PI * 2); ctx.stroke();
   }
   // 玩家血條
   ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(P.x - 18, P.y + P.r + 6, 36, 5);
