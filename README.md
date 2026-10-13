@@ -16,6 +16,7 @@
 | `STAGES` | 五個關卡：場景、怪的組成、魔王血量與招式 |
 | `ENEMY_TYPES` / `spawnEnemies` | 敵人種類與生怪節奏 |
 | `BOSS_ATTACKS` | 魔王招式（衝撞、召喚、彈幕、重擊） |
+| `ITEMS` / `useItem` | 地圖上隨機出現的道具 |
 | `rollChoices` | 升級三選一的抽選規則 |
 | `EVOLUTIONS` / `openChest` | 武器進化配方與寶箱（6 把武器、6 種進化） |
 | `MAX_WEAPONS` / `MAX_PASSIVES` | 欄位上限：武器 4 把、被動 5 種 |

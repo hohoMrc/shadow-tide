@@ -354,6 +354,8 @@ const sfx = (() => {
     // 連續撿光晶，音調一個半音一個半音往上爬
     gem(n)  { if (ok('gem', 32)) { const f = 620 * 2 ** (Math.min(n, 24) / 12); tone(f, f * 1.01, 0.07, 'sine', 0.14); } },
     pulse() { tone(240, 55, 0.28, 'sine', 0.35); },
+    item()  { tone(660, 660, 0.08, 'triangle', 0.3); tone(990, 990, 0.12, 'triangle', 0.3, 0.07); },
+    boom()  { tone(140, 30, 0.7, 'sawtooth', 0.45); tone(70, 25, 0.9, 'sine', 0.5); },
     zap()   { if (ok('zap', 60)) tone(rand(1300, 1700), 260, 0.07, 'sawtooth', 0.07); },
     hurt()  { tone(170, 45, 0.2, 'sawtooth', 0.3); },
     elite() { tone(320, 35, 0.6, 'sawtooth', 0.35); },
@@ -571,6 +573,7 @@ function newGame() {
   game.player = {
     x: 0, y: 0, r: 14, hp: 100, maxHp: 100, iframe: 0,
     speed: 150, moveMul: 1, dmgMul: 1, cdMul: 1, pickup: 70, regen: 0, areaMul: 1, xpMul: 1,
+    frenzyT: 0, shieldT: 0,
     lvl: 1, xp: 0, xpNext: xpNeed(1), faceX: 1, faceY: 0,
   };
   addWeapon('bolt');
@@ -591,6 +594,7 @@ function startStage(i) {
     stage: i, st: 0, phase: 'waves', clearT: 0, boss: null,
     spawnAcc: 0, nextElite: debug ? 5 : 60, nextRing: 90,
     enemies: [], bullets: [], gems: [], shots: [], zones: [], blades: [], fires: [], arcs: [],
+    items: [], nextItem: debug ? 3 : rand(15, 25), freezeT: 0, screenFlash: 0,
     banner: { title: `第 ${i + 1} 關　${S.name}`, sub: S.intro, t: 0 },
   });
   setBossBar(null);
@@ -640,7 +644,9 @@ function update(dt) {
   spawnEnemies(dt);
   buildGrid();
   updateEnemies(dt);
-  for (const w of game.weapons) WEAPON_UPDATE[WEAPONS[w.id].kind](w, dt, WEAPONS[w.id].stat(w.lv));
+  updateItems(dt);
+  const wdt = P.frenzyT > 0 ? dt * 2 : dt;   // 燈火狂熱：武器冷卻與旋轉都變兩倍快
+  for (const w of game.weapons) WEAPON_UPDATE[WEAPONS[w.id].kind](w, wdt, WEAPONS[w.id].stat(w.lv));
   updateBullets(dt);
   updateAreaWeapons(dt);
   updateHazards(dt);
@@ -764,7 +770,9 @@ function updateEnemies(dt) {
     }
     // 預設：朝玩家直線前進；特殊怪由各自的 AI 改寫方向和速度
     const mv = { x: dx / d, y: dy / d, sp: e.speed };
-    if (e.ai === 'spit') spitterAI(e, dt, d, mv);
+    const frozen = game.freezeT > 0;   // 時之沙：完全停住，也不會出招
+    if (frozen) mv.sp = 0;
+    else if (e.ai === 'spit') spitterAI(e, dt, d, mv);
     else if (e.ai === 'charge') chargerAI(e, dt, d, mv);
     else if (e.ai === 'boss') bossAI(e, dt, d, mv);
     // 暈眩中不會移動，但仍會被擊退
@@ -788,7 +796,7 @@ function updateEnemies(dt) {
       }
     });
 
-    if (d < e.r + P.r) damagePlayer(e.dmg);
+    if (!frozen && d < e.r + P.r) damagePlayer(e.dmg);
   }
 }
 
@@ -871,6 +879,74 @@ const BOSS_ATTACKS = {
 };
 
 // ============================================================
+//  隨機道具：每隔一段時間在玩家附近出現，要走過去撿
+// ============================================================
+const ITEMS = {
+  soup:   { name: '熱湯',     icon: '✚', color: '#7dff9b', weight: 25, desc: '回復 30% 生命' },
+  vacuum: { name: '磁暴',     icon: '∪', color: '#7be0ff', weight: 20, desc: '吸取全地圖光晶' },
+  bomb:   { name: '晨光彈',   icon: '✺', color: '#fff3c4', weight: 12, desc: '畫面內小怪全滅' },
+  freeze: { name: '時之沙',   icon: '❄', color: '#a0d7ff', weight: 15, desc: '凍結敵人 4 秒' },
+  frenzy: { name: '燈火狂熱', icon: 'ϟ', color: '#ffc857', weight: 15, desc: '攻速加倍 8 秒' },
+  shield: { name: '守護燈罩', icon: '◯', color: '#d9b8ff', weight: 13, desc: '無敵 6 秒' },
+};
+const ITEM_LIFE = 30;   // 地上放多久會消失
+
+function updateItems(dt) {
+  const P = game.player;
+  game.freezeT = Math.max(0, game.freezeT - dt);
+  P.frenzyT = Math.max(0, P.frenzyT - dt);
+  P.shieldT = Math.max(0, P.shieldT - dt);
+
+  // 每 20～35 秒生一個（過關演出中不生），地上最多 3 個
+  game.nextItem -= dt;
+  if (game.nextItem <= 0 && game.phase !== 'clear') {
+    game.nextItem = rand(20, 35);
+    if (game.items.length < 3) {
+      const a = Math.random() * Math.PI * 2, d = rand(200, 420);
+      game.items.push({ kind: rollItem(), x: P.x + Math.cos(a) * d, y: P.y + Math.sin(a) * d, life: ITEM_LIFE });
+    }
+  }
+  for (const it of game.items) {
+    it.life -= dt;
+    if (Math.hypot(it.x - P.x, it.y - P.y) < P.r + 18) { useItem(it.kind); it.life = 0; }
+  }
+  game.items = game.items.filter(it => it.life > 0);
+}
+
+// 依權重抽道具；血量越低，熱湯的權重越高
+function rollItem() {
+  const P = game.player;
+  const table = Object.entries(ITEMS).map(([id, I]) => [id, id === 'soup' ? I.weight * (2.5 - 2 * P.hp / P.maxHp) : I.weight]);
+  let roll = Math.random() * table.reduce((s, [, w]) => s + w, 0);
+  for (const [id, w] of table) if ((roll -= w) < 0) return id;
+  return 'soup';
+}
+
+function useItem(kind) {
+  const P = game.player, I = ITEMS[kind];
+  sfx.item();
+  addText(P.x, P.y - 34, `${I.name}！`, I.color, true);
+  burst(P.x, P.y, I.color, 16);
+  if (kind === 'soup') P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.3);
+  else if (kind === 'vacuum') for (const g of game.gems) g.magnet = true;
+  else if (kind === 'freeze') game.freezeT = 4;
+  else if (kind === 'frenzy') P.frenzyT = 8;
+  else if (kind === 'shield') P.shieldT = 6;
+  else if (kind === 'bomb') {
+    // 畫面內的小怪全部擊殺（照常掉經驗），魔王扣 8% 血
+    const R = viewRadius();
+    game.screenFlash = 0.5;
+    game.shake = 14;
+    sfx.boom();
+    for (const e of game.enemies) {
+      if (e.dead || Math.hypot(e.x - P.x, e.y - P.y) > R) continue;
+      hurt(e, e.boss ? e.maxHp * 0.08 : e.hp + 1);
+    }
+    game.shots = [];
+  }
+}
+
+// ============================================================
 //  敵方子彈與重擊落點
 // ============================================================
 function enemyShot(x, y, a, speed, dmg, slow = false) {
@@ -881,6 +957,7 @@ function enemyShot(x, y, a, speed, dmg, slow = false) {
 function updateHazards(dt) {
   const P = game.player;
   for (const s of game.shots) {
+    if (game.freezeT > 0) continue;
     s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
     if (Math.hypot(s.x - P.x, s.y - P.y) < s.r + P.r && P.iframe <= 0) {
       damagePlayer(s.dmg);
@@ -890,6 +967,7 @@ function updateHazards(dt) {
   }
   game.shots = game.shots.filter(s => s.life > 0);
   for (const z of game.zones) {
+    if (game.freezeT > 0) continue;
     z.age += dt;
     if (z.age >= z.delay) {
       if (Math.hypot(z.x - P.x, z.y - P.y) < z.r + P.r) damagePlayer(z.dmg);
@@ -902,7 +980,7 @@ function updateHazards(dt) {
 
 function damagePlayer(dmg) {
   const P = game.player;
-  if (P.iframe > 0) return;
+  if (P.iframe > 0 || P.shieldT > 0) return;
   P.hp -= dmg;
   P.iframe = 0.5;
   game.shake = 8;
@@ -1374,9 +1452,9 @@ $('chestBtn').onclick = () => {
 // ============================================================
 //  特效
 // ============================================================
-function addText(x, y, txt, color) {
+function addText(x, y, txt, color, big = false) {
   if (game.texts.length > 60) game.texts.shift();
-  game.texts.push({ x: x + rand(-6, 6), y, txt, color, life: 0.6 });
+  game.texts.push({ x: x + (big ? 0 : rand(-6, 6)), y, txt, color, life: big ? 1.2 : 0.6, big });
 }
 function burst(x, y, color, n) {
   for (let i = 0; i < n && game.particles.length < 600; i++) {
@@ -1392,6 +1470,7 @@ function updateFx(dt) {
   for (const p of game.pops) p.age += dt;
   game.pops = game.pops.filter(p => p.age < 0.22);
   game.comboT += dt; game.gemT += dt;
+  game.screenFlash = Math.max(0, game.screenFlash - dt * 1.5);
   if (game.comboT > 1.5) game.combo = 0;
   for (const t of game.texts) { t.y -= 40 * dt; t.life -= dt; }
   for (const r of game.rings) r.age += dt;
@@ -1457,7 +1536,26 @@ function render() {
     ctx.fill();
   }
 
+  // 隨機道具：上下浮動的光球＋圖示，快消失時閃爍
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const it of game.items) {
+    if (it.life < 5 && Math.floor(it.life * 6) % 2 === 0) continue;
+    const I = ITEMS[it.kind], y = it.y + Math.sin(game.t * 3 + it.x) * 4;
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = I.color;
+    ctx.beginPath(); ctx.arc(it.x, y, 24 + Math.sin(game.t * 5) * 3, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#10121f';
+    ctx.beginPath(); ctx.arc(it.x, y, 15, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = I.color; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.fillStyle = I.color;
+    ctx.font = '700 17px "Noto Sans TC", sans-serif';
+    ctx.fillText(I.icon, it.x, y + 1);
+  }
+  ctx.textBaseline = 'alphabetic';
+
   // 敵人：影子身體 + 一對發光眼睛看著玩家
+  const frozenAll = game.freezeT > 0;
   for (const e of game.enemies) {
     // 衝刺預告：魔王畫出整條衝刺路線，衝影則是身體一閃一閃
     if (e.state === 'wind') {
@@ -1470,7 +1568,7 @@ function render() {
       ctx.beginPath(); ctx.arc(e.x, e.y, e.r + 8, 0, Math.PI * 2); ctx.stroke();
     }
     const winding = e.cs === 'wind' && Math.floor(game.t * 16) % 2 === 0;
-    ctx.fillStyle = e.flash > 0 || winding ? '#ffffff' : e.color;
+    ctx.fillStyle = e.flash > 0 || winding ? '#ffffff' : frozenAll ? '#8fb6d8' : e.color;
     const swell = e.flash > 0 ? 1.25 : 1;
     ctx.beginPath(); ctx.arc(e.x, e.y, e.r * swell, 0, Math.PI * 2); ctx.fill();
     const a = Math.atan2(P.y - e.y, P.x - e.x);
@@ -1568,6 +1666,16 @@ function render() {
     ctx.fillStyle = '#ffc857';
     ctx.beginPath(); ctx.arc(P.x + P.faceX * 15, P.y + P.faceY * 15, 5, 0, Math.PI * 2); ctx.fill();
   }
+  // 守護燈罩：紫色泡泡，快結束時閃爍；燈火狂熱：金色光暈
+  if (P.shieldT > 0 && (P.shieldT > 1.5 || Math.floor(P.shieldT * 8) % 2 === 0)) {
+    ctx.fillStyle = 'rgba(217,184,255,.15)'; ctx.strokeStyle = 'rgba(217,184,255,.8)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(P.x, P.y, P.r + 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  if (P.frenzyT > 0) {
+    ctx.strokeStyle = `rgba(255,200,87,${0.4 + 0.3 * Math.sin(game.t * 14)})`; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(P.x, P.y, P.r + 9 + Math.sin(game.t * 14) * 2, 0, Math.PI * 2); ctx.stroke();
+  }
+
   // 被冰晶減速時，身上一圈冰藍
   if (P.slowT > 0) {
     ctx.strokeStyle = `rgba(160,215,255,${Math.min(1, P.slowT)})`; ctx.lineWidth = 3;
@@ -1599,7 +1707,9 @@ function render() {
   for (const t of game.texts) {
     ctx.globalAlpha = Math.min(1, t.life * 3);
     ctx.fillStyle = t.color;
+    if (t.big) ctx.font = '900 18px "Noto Sans TC", sans-serif';
     ctx.fillText(t.txt, t.x, t.y);
+    if (t.big) ctx.font = '700 13px "Chakra Petch", monospace';
   }
   ctx.globalAlpha = 1;
   ctx.restore();
@@ -1632,6 +1742,7 @@ function render() {
   // 寶箱、魔王在畫面外時，在畫面邊緣畫一個指向它的箭頭
   const targets = game.gems.filter(g => g.kind === 'chest');
   if (game.boss) targets.push(game.boss);
+  for (const it of game.items) targets.push(it);
   for (const c of targets) {
     const dx = (c.x - P.x) * zoom, dy = (c.y - P.y) * zoom;
     const mx = W / 2 - 30, my = H / 2 - 30;
@@ -1640,8 +1751,8 @@ function render() {
     const ax = W / 2 + dx * k, ay = H / 2 + dy * k, a = Math.atan2(dy, dx);
     ctx.save();
     ctx.translate(ax, ay); ctx.rotate(a);
-    ctx.fillStyle = c.boss ? '#ff5d73' : '#ffc857';
-    const sz = c.boss ? 1.5 : 1;
+    ctx.fillStyle = c.boss ? '#ff5d73' : c.kind in ITEMS ? ITEMS[c.kind].color : '#ffc857';
+    const sz = c.boss ? 1.5 : c.kind in ITEMS ? 0.75 : 1;
     ctx.beginPath(); ctx.moveTo(12 * sz, 0); ctx.lineTo(-8 * sz, -9 * sz); ctx.lineTo(-8 * sz, 9 * sz); ctx.fill();
     ctx.restore();
   }
@@ -1662,6 +1773,33 @@ function render() {
       ctx.fillText(B.sub, W / 2, H * 0.32 + 30);
     }
     ctx.restore();
+  }
+
+  // 時之沙：整個畫面淡淡的冰藍；晨光彈：白光一閃
+  if (game.freezeT > 0) {
+    ctx.fillStyle = `rgba(140,190,255,${0.12 * Math.min(1, game.freezeT)})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+  if (game.screenFlash > 0) {
+    ctx.fillStyle = `rgba(255,248,225,${game.screenFlash})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // 生效中的道具效果：畫面底部一排倒數
+  const buffs = [
+    ['frenzy', P.frenzyT], ['shield', P.shieldT], ['freeze', game.freezeT],
+  ].filter(([, t]) => t > 0);
+  if (buffs.length && game.mode !== 'over') {
+    ctx.font = '700 14px "Noto Sans TC", sans-serif';
+    ctx.textAlign = 'center';
+    const gap = 112, y0 = H - 36, x0 = W / 2 - (buffs.length - 1) * gap / 2;
+    buffs.forEach(([id, t], i) => {
+      const I = ITEMS[id], x = x0 + i * gap;
+      ctx.fillStyle = 'rgba(16,18,31,.75)';
+      ctx.beginPath(); ctx.roundRect(x - 50, y0 - 16, 100, 28, 14); ctx.fill();
+      ctx.fillStyle = I.color;
+      ctx.fillText(`${I.icon} ${I.name} ${t.toFixed(1)}`, x, y0 + 3);
+    });
   }
 
   // 搖桿
