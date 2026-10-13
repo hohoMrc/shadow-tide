@@ -131,6 +131,7 @@
     <span><small>等級</small><b id="lvl">1</b></span>
     <span class="time" id="time">00:00</span>
     <span><small>擊殺</small><b id="kills">0</b></span>
+    <button class="pause-btn" id="muteBtn" aria-label="靜音">🔊</button>
     <button class="pause-btn" id="pauseBtn" aria-label="暫停">❚❚</button>
   </div>
 </div>
@@ -203,11 +204,12 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const fmtTime = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 const WIN_TIME = 600;      // 撐到 10 分鐘獲勝
-const MAX_ENEMIES = 350;   // 同時存在的敵人上限，保護手機效能
+const MAX_ENEMIES = 500;   // 同時存在的敵人上限，保護手機效能（模擬測過 500 隻仍很輕）
 
 const canvas = $('game');
 const ctx = canvas.getContext('2d');
 let W = 0, H = 0, zoom = 1;
+let hudBottom = 0;   // HUD 底部的位置（含瀏海安全區），連殺數字排在它下面
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -216,6 +218,7 @@ function resize() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   // 讓手機和電腦看到的「世界範圍」差不多：短邊大約看到 640 單位
   zoom = clamp(Math.min(W, H) / 640, 0.6, 1.4);
+  hudBottom = 0;
 }
 addEventListener('resize', resize);
 resize();
@@ -269,6 +272,65 @@ function readMove() {
   const len = Math.hypot(x, y);
   return len > 1 ? { x: x / len, y: y / len } : { x, y };
 }
+
+// ============================================================
+//  音效：用 Web Audio 即時合成，不需要音檔
+// ============================================================
+const sfx = (() => {
+  let ac = null, master = null, muted = false;
+  try { muted = localStorage.getItem('shadowtide-mute') === '1'; } catch (_) {}
+  const VOL = 0.3;
+  const lastAt = {};
+  // 必須在使用者點擊時建立（瀏覽器規定），所以在開始遊戲時呼叫
+  function init() {
+    if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ac = new AC();
+    master = ac.createGain();
+    master.gain.value = muted ? 0 : VOL;
+    master.connect(ac.destination);
+  }
+  // 同一種音效限制頻率：幾百隻怪同時死也不會爆音
+  function ok(name, gapMs) {
+    const t = performance.now();
+    if (t - (lastAt[name] || 0) < gapMs) return false;
+    lastAt[name] = t;
+    return true;
+  }
+  function tone(f0, f1, dur, type = 'sine', vol = 0.5, delay = 0) {
+    if (!ac || muted) return;
+    const t0 = ac.currentTime + delay;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + dur);
+    g.gain.setValueAtTime(vol, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    o.connect(g).connect(master);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  }
+  const arp = (notes, step, dur) => notes.forEach((f, i) => tone(f, f, dur, 'triangle', 0.28, i * step));
+  return {
+    init,
+    get muted() { return muted; },
+    toggle() {
+      muted = !muted;
+      if (master) master.gain.value = muted ? 0 : VOL;
+      try { localStorage.setItem('shadowtide-mute', muted ? '1' : '0'); } catch (_) {}
+      return muted;
+    },
+    hit()   { if (ok('hit', 45)) tone(rand(850, 1000), 500, 0.035, 'square', 0.06); },
+    kill()  { if (ok('kill', 28)) tone(rand(480, 720), 110, 0.09, 'triangle', 0.25); },
+    // 連續撿光晶，音調一個半音一個半音往上爬
+    gem(n)  { if (ok('gem', 32)) { const f = 620 * 2 ** (Math.min(n, 24) / 12); tone(f, f * 1.01, 0.07, 'sine', 0.14); } },
+    pulse() { tone(240, 55, 0.28, 'sine', 0.35); },
+    hurt()  { tone(170, 45, 0.2, 'sawtooth', 0.3); },
+    elite() { tone(320, 35, 0.6, 'sawtooth', 0.35); },
+    levelUp() { arp([523, 659, 784, 1047], 0.06, 0.15); },
+    chest()   { arp([392, 523, 659, 784, 1047, 1319], 0.055, 0.2); },
+  };
+})();
 
 // ============================================================
 //  空間格子：把敵人依位置分格，碰撞時只檢查附近的格子
@@ -361,8 +423,8 @@ const MAX_WEAPONS = 4;
 //  敵人種類
 // ============================================================
 const ENEMY_TYPES = {
-  wisp:   { r: 11, hp: 12,  speed: 72,  dmg: 8,  xp: 1,  color: '#5b4f8c' },
-  runner: { r: 9,  hp: 8,   speed: 125, dmg: 6,  xp: 1,  color: '#3f7a8c' },
+  wisp:   { r: 11, hp: 7,   speed: 72,  dmg: 8,  xp: 1,  color: '#5b4f8c' },
+  runner: { r: 9,  hp: 6,   speed: 125, dmg: 6,  xp: 1,  color: '#3f7a8c' },
   brute:  { r: 19, hp: 55,  speed: 46,  dmg: 15, xp: 3,  color: '#7a3f63' },
   elite:  { r: 30, hp: 450, speed: 52,  dmg: 25, xp: 25, color: '#a8324f', elite: true },
 };
@@ -377,10 +439,12 @@ function newGame() {
     mode: 'play', t: 0, kills: 0, shake: 0,
     spawnAcc: 0, nextElite: 60, nextRing: 90,
     pendingLevels: 0, pendingChests: 0, starterChest: false,
-    enemies: [], bullets: [], gems: [], rings: [], particles: [], texts: [],
+    enemies: [], bullets: [], gems: [], rings: [], particles: [], texts: [], pops: [],
+    combo: 0, comboT: 0, bestCombo: 0, gemCombo: 0, gemT: 0,
     weapons: [], passives: {},
   });
   // 網址加 ?debug：一開始就有滿級武器和配方被動，5 秒出菁英，方便測試進化
+  sfx.init();
   const debug = location.search.includes('debug');
   if (debug) game.nextElite = 5;
   game.player = {
@@ -399,7 +463,8 @@ function newGame() {
   $('hud').hidden = false;
 }
 
-const xpNeed = lvl => Math.floor(4 + lvl * 4 + lvl * lvl * 0.3);
+// 怪變多之後經驗也多，需求跟著拉高，讓整局大約升到 40 級左右
+const xpNeed = lvl => Math.floor(5 + lvl * 6 + lvl * lvl * 0.6);
 
 function addWeapon(id) {
   const w = game.weapons.find(w => w.id === id);
@@ -458,10 +523,15 @@ const viewRadius = () => Math.hypot(W, H) / 2 / zoom;
 
 function spawnEnemies(dt) {
   const t = game.t;
-  game.spawnAcc += dt * Math.min(1.5 + t / 12, 30);
-  while (game.spawnAcc >= 1) {
-    game.spawnAcc -= 1;
-    spawnEnemy(pickType());
+  // 成群出現：同一個方向一次湧來一小團，掃過去才有「割草」的感覺
+  game.spawnAcc += dt * Math.min(3 + t / 8, 45);
+  const group = 3 + Math.floor(Math.random() * (3 + t / 60));
+  if (game.spawnAcc >= group) {
+    game.spawnAcc -= group;
+    const a = Math.random() * Math.PI * 2, d = viewRadius() + 40;
+    const cx = game.player.x + Math.cos(a) * d, cy = game.player.y + Math.sin(a) * d;
+    const type = pickType();
+    for (let i = 0; i < group; i++) spawnEnemy(type, cx + rand(-40, 40), cy + rand(-40, 40));
   }
   // 每分鐘一隻菁英
   if (t >= game.nextElite) { game.nextElite += 60; spawnEnemy('elite'); }
@@ -492,7 +562,7 @@ function spawnEnemy(type, x, y, force) {
     x = game.player.x + Math.cos(a) * d;
     y = game.player.y + Math.sin(a) * d;
   }
-  const hp = T.hp * (1 + game.t / 80);   // 血量隨時間成長
+  const hp = T.hp * (1 + game.t / 120);  // 血量隨時間成長（成長慢一點，小怪才能維持一兩下就倒）
   game.enemies.push({ ...T, type, x, y, hp, maxHp: hp, vx: 0, vy: 0, flash: 0, orbitCd: 0, stun: 0, dead: false });
 }
 
@@ -534,6 +604,7 @@ function updateEnemies(dt) {
       P.hp -= e.dmg;
       P.iframe = 0.5;
       game.shake = 8;
+      sfx.hurt();
       addText(P.x, P.y - 24, e.dmg, '#ff5d73');
     }
   }
@@ -550,13 +621,17 @@ function hurt(e, dmg, kx = 0, ky = 0) {
   if (e.hp <= 0) {
     e.dead = true;
     game.kills++;
-    burst(e.x, e.y, e.color, e.elite ? 24 : 6);
+    game.combo++; game.comboT = 0;
+    game.bestCombo = Math.max(game.bestCombo, game.combo);
+    burst(e.x, e.y, e.color, e.elite ? 40 : 10);
+    if (game.pops.length < 80) game.pops.push({ x: e.x, y: e.y, r: e.r, age: 0 });
+    if (e.elite) { sfx.elite(); game.shake = 10; } else sfx.kill();
     game.gems.push({ x: e.x, y: e.y, v: e.xp, kind: 'xp', magnet: false });
     if (e.elite) {
       game.gems.push({ x: e.x + 14, y: e.y, v: 30, kind: 'heal', magnet: false });
       game.gems.push({ x: e.x - 14, y: e.y, v: 0, kind: 'chest', magnet: false });
     }
-  }
+  } else sfx.hit();
 }
 
 // ============================================================
@@ -616,6 +691,7 @@ const WEAPON_UPDATE = {
     if (w.timer > 0) return;
     const P = game.player;
     game.rings.push({ x: P.x, y: P.y, max: s.radius, life: 0.35, age: 0, color: s.color });
+    sfx.pulse();
     forNear(P.x, P.y, s.radius + 30, e => {
       const dx = e.x - P.x, dy = e.y - P.y, d = Math.hypot(dx, dy) || 1;
       if (d < s.radius + e.r) {
@@ -671,7 +747,12 @@ function updateGems(dt) {
         game.pendingChests++;
         if (g.starter) game.starterChest = true;
       }
-      else gainXp(g.v);
+      else {
+        gainXp(g.v);
+        game.gemCombo = game.gemT < 0.6 ? game.gemCombo + 1 : 0;
+        game.gemT = 0;
+        sfx.gem(game.gemCombo);
+      }
     }
   }
   game.gems = game.gems.filter(g => !g.taken);
@@ -717,6 +798,7 @@ let levelOpenedAt = 0;
 function openLevelUp() {
   game.mode = 'levelup';
   game.pendingLevels--;
+  sfx.levelUp();
   levelOpenedAt = performance.now();
   stick.id = null;
   const box = $('choices');
@@ -788,6 +870,7 @@ const evolvable = () => EVOLUTIONS.filter(r => {
 function openChest() {
   game.mode = 'chest';
   game.pendingChests--;
+  sfx.chest();
   levelOpenedAt = performance.now();
   stick.id = null;
   const ready = evolvable();
@@ -848,13 +931,20 @@ function addText(x, y, txt, color) {
   game.texts.push({ x: x + rand(-6, 6), y, txt, color, life: 0.6 });
 }
 function burst(x, y, color, n) {
-  for (let i = 0; i < n && game.particles.length < 300; i++) {
-    const a = Math.random() * Math.PI * 2, s = rand(40, 160);
-    game.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.3, 0.6), color });
+  for (let i = 0; i < n && game.particles.length < 600; i++) {
+    const a = Math.random() * Math.PI * 2, s = rand(60, 220);
+    game.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.25, 0.55), size: rand(2.5, 6), color });
   }
 }
 function updateFx(dt) {
-  for (const p of game.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+  for (const p of game.particles) {
+    p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+    p.vx *= 1 - 4 * dt; p.vy *= 1 - 4 * dt;   // 噴出去後很快減速，看起來比較有爆開的感覺
+  }
+  for (const p of game.pops) p.age += dt;
+  game.pops = game.pops.filter(p => p.age < 0.22);
+  game.comboT += dt; game.gemT += dt;
+  if (game.comboT > 1.5) game.combo = 0;
   for (const t of game.texts) { t.y -= 40 * dt; t.life -= dt; }
   for (const r of game.rings) r.age += dt;
   game.particles = game.particles.filter(p => p.life > 0);
@@ -902,7 +992,8 @@ function render() {
   // 敵人：影子身體 + 一對發光眼睛看著玩家
   for (const e of game.enemies) {
     ctx.fillStyle = e.flash > 0 ? '#ffffff' : e.color;
-    ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2); ctx.fill();
+    const swell = e.flash > 0 ? 1.25 : 1;
+    ctx.beginPath(); ctx.arc(e.x, e.y, e.r * swell, 0, Math.PI * 2); ctx.fill();
     const a = Math.atan2(P.y - e.y, P.x - e.x);
     const ex = Math.cos(a) * e.r * 0.35, ey = Math.sin(a) * e.r * 0.35;
     const px = -Math.sin(a) * e.r * 0.3, py = Math.cos(a) * e.r * 0.3;
@@ -957,11 +1048,19 @@ function render() {
   ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(P.x - 18, P.y + P.r + 6, 36, 5);
   ctx.fillStyle = '#ff5d73'; ctx.fillRect(P.x - 18, P.y + P.r + 6, 36 * Math.max(0, P.hp / P.maxHp), 5);
 
+  // 擊殺瞬間的白色光環
+  for (const p of game.pops) {
+    const k = p.age / 0.22;
+    ctx.strokeStyle = `rgba(255,255,255,${0.8 * (1 - k)})`;
+    ctx.lineWidth = 3 * (1 - k) + 1;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1 + 1.4 * k), 0, Math.PI * 2); ctx.stroke();
+  }
+
   // 粒子
   for (const p of game.particles) {
     ctx.globalAlpha = Math.min(1, p.life * 3);
     ctx.fillStyle = p.color;
-    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
   }
   ctx.globalAlpha = 1;
 
@@ -982,6 +1081,24 @@ function render() {
   g.addColorStop(1, 'rgba(5,6,12,.88)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
+
+  // 連殺：10 連以上才顯示，每殺一隻就彈一下
+  if (game.combo >= 10 && game.mode !== 'over') {
+    const pop = 1 + Math.max(0, 0.12 - game.comboT) * 3;
+    const size = Math.min(22 + game.combo / 20, 40) * pop;
+    ctx.save();
+    if (!hudBottom) hudBottom = $('hud').getBoundingClientRect().bottom;
+    ctx.translate(W / 2, hudBottom + 34);
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = clamp(1.5 - game.comboT, 0, 1);
+    ctx.fillStyle = '#ffc857';
+    ctx.font = `700 ${size}px "Chakra Petch", monospace`;
+    ctx.fillText(game.combo, 0, 0);
+    ctx.font = '500 13px "Noto Sans TC", sans-serif';
+    ctx.fillStyle = '#ece8f5';
+    ctx.fillText('連殺', 0, 20);
+    ctx.restore();
+  }
 
   // 寶箱在畫面外時，在畫面邊緣畫一個指向它的箭頭
   for (const c of game.gems) {
@@ -1089,7 +1206,7 @@ function endGame(win) {
   } catch (_) { best = Math.max(best, game.t); }
   $('overTitle').textContent = win ? '天亮了' : '燈熄了';
   $('overTitle').style.color = win ? 'var(--lamp)' : '';
-  $('overSub').textContent = win ? '你撐過了整個黑夜。' : `最佳紀錄 ${fmtTime(best)}`;
+  $('overSub').textContent = (win ? '你撐過了整個黑夜。' : `最佳紀錄 ${fmtTime(best)}`) + `　最高連殺 ${game.bestCombo}`;
   $('rTime').textContent = fmtTime(game.t);
   $('rLvl').textContent = game.player.lvl;
   $('rKills').textContent = game.kills;
@@ -1098,6 +1215,9 @@ function endGame(win) {
 }
 
 $('startBtn').onclick = newGame;
+const syncMute = () => { $('muteBtn').textContent = sfx.muted ? '🔇' : '🔊'; };
+$('muteBtn').onclick = () => { sfx.toggle(); syncMute(); };
+syncMute();
 $('againBtn').onclick = newGame;
 $('quitBtn').onclick = newGame;
 $('resumeBtn').onclick = togglePause;
