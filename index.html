@@ -376,7 +376,7 @@ function newGame() {
   Object.assign(game, {
     mode: 'play', t: 0, kills: 0, shake: 0,
     spawnAcc: 0, nextElite: 60, nextRing: 90,
-    pendingLevels: 0, pendingChests: 0,
+    pendingLevels: 0, pendingChests: 0, starterChest: false,
     enemies: [], bullets: [], gems: [], rings: [], particles: [], texts: [],
     weapons: [], passives: {},
   });
@@ -389,8 +389,8 @@ function newGame() {
     lvl: 1, xp: 0, xpNext: xpNeed(1), faceX: 1, faceY: 0,
   };
   addWeapon('bolt');
-  // 開局送一個寶箱，放在角色上方，走幾步就撿得到
-  game.gems.push({ x: 0, y: -150, v: 0, kind: 'chest', magnet: false });
+  // 開局送一個寶箱（必定是新武器），放在角色上方，走幾步就撿得到
+  game.gems.push({ x: 0, y: -150, v: 0, kind: 'chest', starter: true, magnet: false });
   if (debug) {
     for (const id of ['bolt', 'orbit', 'pulse']) while ((game.weapons.find(w => w.id === id)?.lv || 0) < WEAPONS[id].max) addWeapon(id);
     for (const id of ['focus', 'vigor', 'might']) { game.passives[id] = 1; PASSIVES[id].apply(game.player); }
@@ -667,7 +667,10 @@ function updateGems(dt) {
       if (g.kind === 'heal') {
         P.hp = Math.min(P.maxHp, P.hp + g.v);
         addText(P.x, P.y - 24, '+' + g.v, '#7dff9b');
-      } else if (g.kind === 'chest') game.pendingChests++;
+      } else if (g.kind === 'chest') {
+        game.pendingChests++;
+        if (g.starter) game.starterChest = true;
+      }
       else gainXp(g.v);
     }
   }
@@ -789,7 +792,18 @@ function openChest() {
   stick.id = null;
   const ready = evolvable();
   let html;
-  if (ready.length) {
+  // 開局寶箱：從還沒擁有的武器裡抽一把
+  const starter = game.starterChest;
+  game.starterChest = false;
+  const fresh = Object.keys(WEAPONS).filter(id => !WEAPONS[id].evolved
+    && !game.weapons.some(w => w.id === id || w.id === EVOLUTIONS.find(r => r.from === id)?.into));
+  if (starter && fresh.length) {
+    const id = fresh[Math.floor(Math.random() * fresh.length)];
+    addWeapon(id);
+    const D = WEAPONS[id];
+    $('chestTitle').textContent = '新武器！';
+    html = `<div class="evo"><span class="to">${D.icon}<small>${D.name}</small></span></div><p>${D.blurb}</p>`;
+  } else if (ready.length) {
     const r = ready[Math.floor(Math.random() * ready.length)];
     const w = game.weapons.find(w => w.id === r.from);
     // 直接把武器換成進化版，保留原本的計時與角度，攻擊不會中斷
