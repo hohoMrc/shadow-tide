@@ -104,6 +104,22 @@
   .build { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 18px; }
   .build span { font-size: .85rem; padding: 4px 10px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); }
   .build span em { font-style: normal; color: var(--lamp); font-family: var(--font-gauge); margin-left: 4px; }
+
+  /* 進化動畫：舊武器 → 新武器 */
+  .evo { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 18px 0 10px; }
+  .evo span { display: grid; justify-items: center; gap: 6px; font-size: 40px; line-height: 1; }
+  .evo small { font-size: .9rem; color: var(--dim); }
+  .evo .to { color: var(--lamp); text-shadow: 0 0 18px rgba(255,200,87,.7); animation: evo-pop .6s ease-out; }
+  .evo .to small { color: var(--lamp); font-weight: 700; }
+  .evo .arrow { font-size: 24px; color: var(--dim); }
+  @keyframes evo-pop { 0% { transform: scale(.3); opacity: 0; } 70% { transform: scale(1.2); } 100% { transform: scale(1); opacity: 1; } }
+  .hint { font-size: .85rem; }
+
+  .recipes { display: grid; gap: 6px; margin-bottom: 18px; font-size: .85rem; }
+  .recipes div { display: flex; justify-content: center; gap: 6px; align-items: center; color: var(--dim); }
+  .recipes .ok { color: var(--ink); }
+  .recipes .ok::after { content: '✓'; color: var(--lamp); }
+  .recipes .done { color: var(--lamp); }
 </style>
 </head>
 <body>
@@ -140,11 +156,21 @@
   </div>
 </div>
 
+<div class="overlay" id="chestScreen" hidden>
+  <div class="card">
+    <h2 id="chestTitle">寶箱</h2>
+    <div id="chestBody"></div>
+    <button class="btn" id="chestBtn">收下</button>
+  </div>
+</div>
+
 <div class="overlay" id="pauseScreen" hidden>
   <div class="card">
     <h2>暫停</h2>
     <p>目前的流派</p>
     <div class="build" id="pauseBuild"></div>
+    <p style="margin-bottom:8px">進化配方</p>
+    <div class="recipes" id="recipes"></div>
     <div class="btns">
       <button class="btn" id="resumeBtn">繼續</button>
       <button class="btn ghost" id="quitBtn">重新開始</button>
@@ -205,6 +231,7 @@ addEventListener('keydown', e => {
     const btn = $('choices').children[Number(e.key) - 1];
     if (btn) btn.click();
   }
+  if (game.mode === 'chest' && (e.key === 'Enter' || e.key === ' ')) $('chestBtn').click();
 });
 addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
 addEventListener('blur', () => keys.clear());
@@ -272,26 +299,53 @@ function forNear(x, y, r, fn) {
 // ============================================================
 //  武器與被動：升級選項的資料都在這裡，加新技能只要加一筆
 // ============================================================
+// 同一種攻擊方式（kind）共用一段行為程式，進化版只是數值和外觀不同
 const WEAPONS = {
   bolt: {
-    name: '星光彈', icon: '✦', max: 6,
+    name: '星光彈', icon: '✦', max: 6, kind: 'shoot',
     blurb: '自動射向最近的敵人',
-    stat: lv => ({ cd: 1.0 - 0.1 * (lv - 1), dmg: 10 + 4 * (lv - 1), count: 1 + Math.floor((lv - 1) / 2), pierce: lv >= 6 ? 3 : lv >= 4 ? 2 : 1 }),
+    stat: lv => ({ cd: 1.0 - 0.1 * (lv - 1), dmg: 10 + 4 * (lv - 1), count: 1 + Math.floor((lv - 1) / 2), pierce: lv >= 6 ? 3 : lv >= 4 ? 2 : 1,
+                   speed: 430, r: 5, spread: 0.16, color: '#fff3c4' }),
     desc: s => `傷害 ${s.dmg} · 每 ${s.cd.toFixed(1)} 秒 ${s.count} 發 · 貫穿 ${s.pierce}`,
   },
   orbit: {
-    name: '守夜燈', icon: '◉', max: 5,
+    name: '守夜燈', icon: '◉', max: 5, kind: 'orbit',
     blurb: '燈火繞著你旋轉，燒傷碰到的影子',
-    stat: lv => ({ count: lv + 1, dmg: 8 + 3 * (lv - 1), radius: 62 + 6 * lv }),
+    stat: lv => ({ count: lv + 1, dmg: 8 + 3 * (lv - 1), radius: 62 + 6 * lv, size: 8, spin: 3.2, hitCd: 0.45 }),
     desc: s => `${s.count} 顆燈火 · 傷害 ${s.dmg}`,
   },
   pulse: {
-    name: '震光環', icon: '◎', max: 5,
+    name: '震光環', icon: '◎', max: 5, kind: 'pulse',
     blurb: '定期爆出光環，擊退周圍所有敵人',
-    stat: lv => ({ cd: 3.2 - 0.3 * (lv - 1), dmg: 16 + 6 * (lv - 1), radius: 100 + 15 * (lv - 1) }),
+    stat: lv => ({ cd: 3.2 - 0.3 * (lv - 1), dmg: 16 + 6 * (lv - 1), radius: 100 + 15 * (lv - 1), stun: 0, color: '255,200,87' }),
     desc: s => `傷害 ${s.dmg} · 範圍 ${s.radius} · 每 ${s.cd.toFixed(1)} 秒`,
   },
+
+  // ---- 進化武器：只能從寶箱得到，不會出現在升級選項裡 ----
+  nova: {
+    name: '星河', icon: '✸', max: 1, kind: 'shoot', evolved: true,
+    blurb: '光彈化成星河，高速連射、無限貫穿',
+    stat: () => ({ cd: 0.28, dmg: 30, count: 2, pierce: Infinity, speed: 560, r: 7, spread: 0.08, color: '#ffc857' }),
+  },
+  crown: {
+    name: '烈日冠', icon: '☀', max: 1, kind: 'orbit', evolved: true,
+    blurb: '8 顆烈日環繞，軌道一縮一放',
+    // 半徑隨時間呼吸，近身和外圈都掃得到
+    stat: () => ({ count: 8, dmg: 28, radius: 105 + 40 * Math.sin(game.t * 2), size: 13, spin: 4.2, hitCd: 0.3 }),
+  },
+  dawn: {
+    name: '破曉', icon: '✺', max: 1, kind: 'pulse', evolved: true,
+    blurb: '黎明的光爆，大範圍重擊並讓影子暈眩',
+    stat: () => ({ cd: 1.6, dmg: 60, radius: 220, stun: 0.8, color: '255,244,214' }),
+  },
 };
+
+// 進化配方：武器滿級 + 擁有對應被動 → 撿到寶箱時進化
+const EVOLUTIONS = [
+  { from: 'bolt',  need: 'focus', into: 'nova' },
+  { from: 'orbit', need: 'vigor', into: 'crown' },
+  { from: 'pulse', need: 'might', into: 'dawn' },
+];
 
 const PASSIVES = {
   vigor:  { name: '強韌', icon: '♥', max: 5, desc: '最大生命 +20，並回復 20', apply: p => { p.maxHp += 20; p.hp = Math.min(p.maxHp, p.hp + 20); } },
@@ -322,16 +376,23 @@ function newGame() {
   Object.assign(game, {
     mode: 'play', t: 0, kills: 0, shake: 0,
     spawnAcc: 0, nextElite: 60, nextRing: 90,
-    pendingLevels: 0,
+    pendingLevels: 0, pendingChests: 0,
     enemies: [], bullets: [], gems: [], rings: [], particles: [], texts: [],
     weapons: [], passives: {},
   });
+  // 網址加 ?debug：一開始就有滿級武器和配方被動，5 秒出菁英，方便測試進化
+  const debug = location.search.includes('debug');
+  if (debug) game.nextElite = 5;
   game.player = {
     x: 0, y: 0, r: 14, hp: 100, maxHp: 100, iframe: 0,
     speed: 150, moveMul: 1, dmgMul: 1, cdMul: 1, pickup: 70, regen: 0,
     lvl: 1, xp: 0, xpNext: xpNeed(1), faceX: 1, faceY: 0,
   };
   addWeapon('bolt');
+  if (debug) {
+    for (const id of ['bolt', 'orbit', 'pulse']) while ((game.weapons.find(w => w.id === id)?.lv || 0) < WEAPONS[id].max) addWeapon(id);
+    for (const id of ['focus', 'vigor', 'might']) { game.passives[id] = 1; PASSIVES[id].apply(game.player); }
+  }
   showOnly(null);
   $('hud').hidden = false;
 }
@@ -372,7 +433,7 @@ function update(dt) {
   spawnEnemies(dt);
   buildGrid();
   updateEnemies(dt);
-  for (const w of game.weapons) WEAPON_UPDATE[w.id](w, dt);
+  for (const w of game.weapons) WEAPON_UPDATE[WEAPONS[w.id].kind](w, dt, WEAPONS[w.id].stat(w.lv));
   updateBullets(dt);
   updateGems(dt);
   updateFx(dt);
@@ -382,7 +443,9 @@ function update(dt) {
 
   if (P.hp <= 0) return endGame(false);
   if (game.t >= WIN_TIME) return endGame(true);
-  if (game.pendingLevels > 0) openLevelUp();
+  // 寶箱優先：先進化，接下來的升級選項才會反映新武器
+  if (game.pendingChests > 0) openChest();
+  else if (game.pendingLevels > 0) openLevelUp();
   updateHud();
 }
 
@@ -428,7 +491,7 @@ function spawnEnemy(type, x, y, force) {
     y = game.player.y + Math.sin(a) * d;
   }
   const hp = T.hp * (1 + game.t / 80);   // 血量隨時間成長
-  game.enemies.push({ ...T, type, x, y, hp, maxHp: hp, vx: 0, vy: 0, flash: 0, orbitCd: 0, dead: false });
+  game.enemies.push({ ...T, type, x, y, hp, maxHp: hp, vx: 0, vy: 0, flash: 0, orbitCd: 0, stun: 0, dead: false });
 }
 
 function updateEnemies(dt) {
@@ -443,8 +506,11 @@ function updateEnemies(dt) {
       e.x = P.x + Math.cos(a) * r; e.y = P.y + Math.sin(a) * r;
       continue;
     }
-    e.x += (dx / d * e.speed + e.vx) * dt;
-    e.y += (dy / d * e.speed + e.vy) * dt;
+    // 暈眩中不會追玩家，但仍會被擊退
+    const chase = e.stun > 0 ? 0 : e.speed;
+    e.stun -= dt;
+    e.x += (dx / d * chase + e.vx) * dt;
+    e.y += (dy / d * chase + e.vy) * dt;
     // 擊退速度逐漸衰減
     const decay = Math.min(1, 8 * dt);
     e.vx -= e.vx * decay; e.vy -= e.vy * decay;
@@ -484,7 +550,10 @@ function hurt(e, dmg, kx = 0, ky = 0) {
     game.kills++;
     burst(e.x, e.y, e.color, e.elite ? 24 : 6);
     game.gems.push({ x: e.x, y: e.y, v: e.xp, kind: 'xp', magnet: false });
-    if (e.elite) game.gems.push({ x: e.x + 14, y: e.y, v: 30, kind: 'heal', magnet: false });
+    if (e.elite) {
+      game.gems.push({ x: e.x + 14, y: e.y, v: 30, kind: 'heal', magnet: false });
+      game.gems.push({ x: e.x - 14, y: e.y, v: 0, kind: 'chest', magnet: false });
+    }
   }
 }
 
@@ -501,51 +570,56 @@ function nearestEnemy(x, y, maxD) {
   return best;
 }
 
+// 依攻擊方式分三種行為，s 是該武器目前等級的數值
 const WEAPON_UPDATE = {
-  bolt(w, dt) {
+  shoot(w, dt, s) {
     w.timer -= dt;
     if (w.timer > 0) return;
-    const P = game.player, s = WEAPONS.bolt.stat(w.lv);
+    const P = game.player;
     const target = nearestEnemy(P.x, P.y, 520);
     if (!target) { w.timer = 0.1; return; }
     const base = Math.atan2(target.y - P.y, target.x - P.x);
     for (let i = 0; i < s.count; i++) {
-      const a = base + (i - (s.count - 1) / 2) * 0.16;
+      const a = base + (i - (s.count - 1) / 2) * s.spread;
       game.bullets.push({
-        x: P.x, y: P.y, vx: Math.cos(a) * 430, vy: Math.sin(a) * 430,
-        r: 5, dmg: s.dmg * P.dmgMul, pierce: s.pierce, life: 1.3, hit: new Set(),
+        x: P.x, y: P.y, vx: Math.cos(a) * s.speed, vy: Math.sin(a) * s.speed,
+        r: s.r, color: s.color, dmg: s.dmg * P.dmgMul, pierce: s.pierce, life: 1.3, hit: new Set(),
       });
     }
     w.timer = s.cd * P.cdMul;
   },
 
-  orbit(w, dt) {
-    const P = game.player, s = WEAPONS.orbit.stat(w.lv);
-    w.angle += 3.2 * dt;
+  orbit(w, dt, s) {
+    const P = game.player;
+    w.angle += s.spin * dt;
+    w.size = s.size;
     w.orbs = [];
     for (let i = 0; i < s.count; i++) {
       const a = w.angle + i / s.count * Math.PI * 2;
       const ox = P.x + Math.cos(a) * s.radius, oy = P.y + Math.sin(a) * s.radius;
       w.orbs.push({ x: ox, y: oy });
-      forNear(ox, oy, 40, e => {
-        if (e.orbitCd > game.t) return;          // 同一隻敵人 0.45 秒只吃一次
-        if (Math.hypot(e.x - ox, e.y - oy) < e.r + 10) {
+      forNear(ox, oy, s.size + 32, e => {
+        if (e.orbitCd > game.t) return;          // 同一隻敵人一段時間內只吃一次
+        if (Math.hypot(e.x - ox, e.y - oy) < e.r + s.size + 2) {
           const d = Math.hypot(e.x - P.x, e.y - P.y) || 1;
           hurt(e, s.dmg * P.dmgMul, (e.x - P.x) / d * 120, (e.y - P.y) / d * 120);
-          e.orbitCd = game.t + 0.45;
+          e.orbitCd = game.t + s.hitCd;
         }
       });
     }
   },
 
-  pulse(w, dt) {
+  pulse(w, dt, s) {
     w.timer -= dt;
     if (w.timer > 0) return;
-    const P = game.player, s = WEAPONS.pulse.stat(w.lv);
-    game.rings.push({ x: P.x, y: P.y, max: s.radius, life: 0.35, age: 0 });
+    const P = game.player;
+    game.rings.push({ x: P.x, y: P.y, max: s.radius, life: 0.35, age: 0, color: s.color });
     forNear(P.x, P.y, s.radius + 30, e => {
       const dx = e.x - P.x, dy = e.y - P.y, d = Math.hypot(dx, dy) || 1;
-      if (d < s.radius + e.r) hurt(e, s.dmg * P.dmgMul, dx / d * 320, dy / d * 320);
+      if (d < s.radius + e.r) {
+        hurt(e, s.dmg * P.dmgMul, dx / d * 320, dy / d * 320);
+        if (s.stun) e.stun = e.elite ? s.stun / 3 : s.stun;
+      }
     });
     w.timer = s.cd * P.cdMul;
   },
@@ -573,9 +647,11 @@ function updateBullets(dt) {
 function updateGems(dt) {
   const P = game.player;
   // 地上光晶太多時合併，避免越積越卡
+  // （只合併經驗光晶，寶箱和回血不能被併掉）
   if (game.gems.length > 400) {
-    const g = game.gems.shift();
-    game.gems[Math.floor(Math.random() * game.gems.length)].v += g.v;
+    const i = game.gems.findIndex(g => g.kind === 'xp');
+    const j = game.gems.findIndex((g, k) => k !== i && g.kind === 'xp');
+    if (i >= 0 && j >= 0) { game.gems[j].v += game.gems[i].v; game.gems.splice(i, 1); }
   }
   for (const g of game.gems) {
     const dx = P.x - g.x, dy = P.y - g.y, d = Math.hypot(dx, dy) || 1;
@@ -589,7 +665,8 @@ function updateGems(dt) {
       if (g.kind === 'heal') {
         P.hp = Math.min(P.maxHp, P.hp + g.v);
         addText(P.x, P.y - 24, '+' + g.v, '#7dff9b');
-      } else gainXp(g.v);
+      } else if (g.kind === 'chest') game.pendingChests++;
+      else gainXp(g.v);
     }
   }
   game.gems = game.gems.filter(g => !g.taken);
@@ -610,6 +687,10 @@ function gainXp(v) {
 function rollChoices() {
   const pool = [];
   for (const [id, W_] of Object.entries(WEAPONS)) {
+    if (W_.evolved) continue;
+    // 已經進化掉的武器，不能再當新武器拿一次
+    const evolvedInto = EVOLUTIONS.find(r => r.from === id)?.into;
+    if (evolvedInto && game.weapons.some(w => w.id === evolvedInto)) continue;
     const owned = game.weapons.find(w => w.id === id);
     if (owned && owned.lv < W_.max) pool.push({ kind: 'weapon', id, lv: owned.lv + 1 });
     if (!owned && game.weapons.length < MAX_WEAPONS) pool.push({ kind: 'weapon', id, lv: 1 });
@@ -641,10 +722,22 @@ function openLevelUp() {
       const D = WEAPONS[c.id];
       icon = D.icon; name = D.name;
       desc = c.lv === 1 ? `${D.blurb}　${D.desc(D.stat(1))}` : D.desc(D.stat(c.lv));
-      tag = c.lv === 1 ? '新武器' : '';
+      tag = c.lv === 1 ? '新武器' : c.lv === D.max ? '滿級' : '';
+      const evo = EVOLUTIONS.find(r => r.from === c.id);
+      if (evo && c.lv === D.max) {
+        desc += game.passives[evo.need]
+          ? `<br>✓ 已有「${PASSIVES[evo.need].name}」，打倒菁英撿寶箱即可進化`
+          : `<br>搭配「${PASSIVES[evo.need].name}」可進化成「${WEAPONS[evo.into].name}」`;
+      }
     } else if (c.kind === 'passive') {
       const D = PASSIVES[c.id];
       icon = D.icon; name = D.name; desc = D.desc;
+      // 是手上某把武器的進化素材，而且還沒拿過，就標出來
+      const evo = EVOLUTIONS.find(r => r.need === c.id && game.weapons.some(w => w.id === r.from));
+      if (evo && c.lv === 1) {
+        tag = '進化素材';
+        desc += `<br>${WEAPONS[evo.from].name}滿級後可進化成「${WEAPONS[evo.into].name}」`;
+      }
     } else {
       icon = '✚'; name = '燈油'; desc = '回復 40 生命';
     }
@@ -669,9 +762,67 @@ function applyChoice(c) {
     game.passives[c.id] = (game.passives[c.id] || 0) + 1;
     PASSIVES[c.id].apply(P);
   } else P.hp = Math.min(P.maxHp, P.hp + 40);
-  if (game.pendingLevels > 0) openLevelUp();
-  else { game.mode = 'play'; showOnly(null); }
+  continueQueue();
 }
+
+// 依序處理還沒打開的寶箱和升級，都處理完才回到遊戲
+function continueQueue() {
+  if (game.pendingChests > 0) openChest();
+  else if (game.pendingLevels > 0) openLevelUp();
+  else { game.mode = 'play'; last = performance.now(); showOnly(null); }
+}
+
+// ============================================================
+//  寶箱：有符合條件的武器就進化，沒有就送一次免費升級
+// ============================================================
+const evolvable = () => EVOLUTIONS.filter(r => {
+  const w = game.weapons.find(w => w.id === r.from);
+  return w && w.lv >= WEAPONS[r.from].max && game.passives[r.need];
+});
+
+function openChest() {
+  game.mode = 'chest';
+  game.pendingChests--;
+  levelOpenedAt = performance.now();
+  stick.id = null;
+  const ready = evolvable();
+  let html;
+  if (ready.length) {
+    const r = ready[Math.floor(Math.random() * ready.length)];
+    const w = game.weapons.find(w => w.id === r.from);
+    // 直接把武器換成進化版，保留原本的計時與角度，攻擊不會中斷
+    w.id = r.into; w.lv = 1;
+    const F = WEAPONS[r.from], T = WEAPONS[r.into];
+    $('chestTitle').textContent = '進化！';
+    html = `<div class="evo">
+      <span class="from">${F.icon}<small>${F.name}</small></span>
+      <span class="arrow">→</span>
+      <span class="to">${T.icon}<small>${T.name}</small></span>
+    </div><p>${T.blurb}</p>`;
+    burst(game.player.x, game.player.y, '#ffc857', 40);
+  } else {
+    // 沒有能進化的：從升級選項裡隨機送一個
+    const c = rollChoices()[0];
+    const P = game.player;
+    let label;
+    if (c.kind === 'weapon') { addWeapon(c.id); label = `${WEAPONS[c.id].icon} ${WEAPONS[c.id].name} Lv.${c.lv}`; }
+    else if (c.kind === 'passive') {
+      game.passives[c.id] = (game.passives[c.id] || 0) + 1;
+      PASSIVES[c.id].apply(P);
+      label = `${PASSIVES[c.id].icon} ${PASSIVES[c.id].name} Lv.${c.lv}`;
+    } else { P.hp = Math.min(P.maxHp, P.hp + 40); label = '✚ 回復 40 生命'; }
+    $('chestTitle').textContent = '寶箱';
+    html = `<p>獲得 <b style="color:var(--lamp)">${label}</b></p>
+      <p class="hint">提示：武器滿級，再加上對應的被動，寶箱就會讓它進化</p>`;
+  }
+  $('chestBody').innerHTML = html;
+  showOnly('chestScreen');
+}
+
+$('chestBtn').onclick = () => {
+  if (performance.now() - levelOpenedAt < 250) return;
+  continueQueue();
+};
 
 // ============================================================
 //  特效
@@ -715,6 +866,15 @@ function render() {
 
   // 光晶
   for (const g of game.gems) {
+    if (g.kind === 'chest') {
+      // 寶箱：金色方塊＋一閃一閃的光暈
+      const glow = 0.35 + 0.25 * Math.sin(game.t * 6);
+      ctx.fillStyle = `rgba(255,200,87,${glow})`;
+      ctx.beginPath(); ctx.arc(g.x, g.y, 22, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#8a5a1c'; ctx.fillRect(g.x - 11, g.y - 8, 22, 16);
+      ctx.fillStyle = '#ffc857'; ctx.fillRect(g.x - 11, g.y - 2, 22, 3); ctx.fillRect(g.x - 2, g.y - 8, 4, 16);
+      continue;
+    }
     const s = g.kind === 'heal' ? 8 : g.v >= 10 ? 7 : g.v >= 3 ? 5.5 : 4.5;
     ctx.fillStyle = g.kind === 'heal' ? '#7dff9b' : g.v >= 10 ? '#c58bff' : g.v >= 3 ? '#8dffb0' : '#7be0ff';
     ctx.beginPath();
@@ -730,7 +890,8 @@ function render() {
     const a = Math.atan2(P.y - e.y, P.x - e.x);
     const ex = Math.cos(a) * e.r * 0.35, ey = Math.sin(a) * e.r * 0.35;
     const px = -Math.sin(a) * e.r * 0.3, py = Math.cos(a) * e.r * 0.3;
-    ctx.fillStyle = e.elite ? '#ffdd55' : '#ff8fa3';
+    // 暈眩時眼睛變暗
+    ctx.fillStyle = e.stun > 0 ? '#6a6680' : e.elite ? '#ffdd55' : '#ff8fa3';
     const er = Math.max(1.6, e.r * 0.12);
     ctx.beginPath();
     ctx.arc(e.x + ex + px, e.y + ey + py, er, 0, Math.PI * 2);
@@ -745,22 +906,28 @@ function render() {
   // 震光環
   for (const r of game.rings) {
     const k = r.age / r.life;
-    ctx.strokeStyle = `rgba(255,200,87,${1 - k})`;
+    ctx.strokeStyle = `rgba(${r.color},${1 - k})`;
     ctx.lineWidth = 6 * (1 - k) + 1;
     ctx.beginPath(); ctx.arc(r.x, r.y, r.max * (0.3 + 0.7 * k), 0, Math.PI * 2); ctx.stroke();
   }
 
-  // 守夜燈
-  for (const w of game.weapons) if (w.id === 'orbit') for (const o of w.orbs) {
+  // 守夜燈 / 烈日冠
+  for (const w of game.weapons) if (WEAPONS[w.id].kind === 'orbit') for (const o of w.orbs) {
     ctx.fillStyle = 'rgba(255,200,87,.25)';
-    ctx.beginPath(); ctx.arc(o.x, o.y, 16, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#ffc857';
-    ctx.beginPath(); ctx.arc(o.x, o.y, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(o.x, o.y, w.size * 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = WEAPONS[w.id].evolved ? '#fff1c2' : '#ffc857';
+    ctx.beginPath(); ctx.arc(o.x, o.y, w.size, 0, Math.PI * 2); ctx.fill();
   }
 
-  // 星光彈
-  ctx.fillStyle = '#fff3c4';
-  for (const b of game.bullets) { ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); }
+  // 光彈：進化後的星河多一條拖尾
+  for (const b of game.bullets) {
+    if (b.r > 5) {
+      ctx.strokeStyle = 'rgba(255,200,87,.35)'; ctx.lineWidth = b.r;
+      ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - b.vx * 0.05, b.y - b.vy * 0.05); ctx.stroke();
+    }
+    ctx.fillStyle = b.color;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+  }
 
   // 玩家：受傷無敵時閃爍
   if (P.iframe <= 0 || Math.floor(P.iframe * 20) % 2 === 0) {
@@ -800,6 +967,21 @@ function render() {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 
+  // 寶箱在畫面外時，在畫面邊緣畫一個指向它的箭頭
+  for (const c of game.gems) {
+    if (c.kind !== 'chest') continue;
+    const dx = (c.x - P.x) * zoom, dy = (c.y - P.y) * zoom;
+    const mx = W / 2 - 30, my = H / 2 - 30;
+    if (Math.abs(dx) < mx && Math.abs(dy) < my) continue;
+    const k = Math.min(mx / Math.abs(dx || 1e-6), my / Math.abs(dy || 1e-6));
+    const ax = W / 2 + dx * k, ay = H / 2 + dy * k, a = Math.atan2(dy, dx);
+    ctx.save();
+    ctx.translate(ax, ay); ctx.rotate(a);
+    ctx.fillStyle = '#ffc857';
+    ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-8, -9); ctx.lineTo(-8, 9); ctx.fill();
+    ctx.restore();
+  }
+
   // 搖桿
   if (stick.id !== null && game.mode === 'play') {
     const dx = stick.x - stick.ox, dy = stick.y - stick.oy, d = Math.hypot(dx, dy);
@@ -836,7 +1018,7 @@ function drawGround(P) {
 // ============================================================
 //  介面
 // ============================================================
-const SCREENS = ['titleScreen', 'levelScreen', 'pauseScreen', 'overScreen'];
+const SCREENS = ['titleScreen', 'levelScreen', 'chestScreen', 'pauseScreen', 'overScreen'];
 function showOnly(id) { for (const s of SCREENS) $(s).hidden = s !== id; }
 
 const hudCache = {};
@@ -851,10 +1033,20 @@ function updateHud() {
 
 function buildHtml() {
   const items = [
-    ...game.weapons.map(w => `<span>${WEAPONS[w.id].icon} ${WEAPONS[w.id].name}<em>${w.lv}</em></span>`),
+    ...game.weapons.map(w => `<span>${WEAPONS[w.id].icon} ${WEAPONS[w.id].name}<em>${WEAPONS[w.id].evolved ? '★' : w.lv}</em></span>`),
     ...Object.entries(game.passives).map(([id, lv]) => `<span>${PASSIVES[id].icon} ${PASSIVES[id].name}<em>${lv}</em></span>`),
   ];
   return items.join('');
+}
+
+// 每條配方的狀態：已進化 / 條件達成（等寶箱）/ 尚未達成
+function recipesHtml() {
+  const ready = evolvable();
+  return EVOLUTIONS.map(r => {
+    const F = WEAPONS[r.from], N = PASSIVES[r.need], T = WEAPONS[r.into];
+    const cls = game.weapons.some(w => w.id === r.into) ? 'done' : ready.includes(r) ? 'ok' : '';
+    return `<div class="${cls}">${F.icon} ${F.name} Lv.${F.max} ＋ ${N.icon} ${N.name} → ${T.icon} ${T.name}</div>`;
+  }).join('');
 }
 
 function togglePause() {
@@ -862,6 +1054,7 @@ function togglePause() {
     game.mode = 'paused';
     stick.id = null;
     $('pauseBuild').innerHTML = buildHtml();
+    $('recipes').innerHTML = recipesHtml();
     showOnly('pauseScreen');
   } else if (game.mode === 'paused') {
     game.mode = 'play';

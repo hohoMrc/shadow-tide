@@ -15,3 +15,6 @@
 | `WEAPON_UPDATE` | 每種武器每格怎麼攻擊 |
 | `ENEMY_TYPES` / `spawnEnemies` | 敵人種類與生怪節奏 |
 | `rollChoices` | 升級三選一的抽選規則 |
+| `EVOLUTIONS` / `openChest` | 武器進化配方與寶箱 |
+
+測試進化：網址後面加 `?debug`，開局就有滿級武器與配方被動，5 秒出菁英。
