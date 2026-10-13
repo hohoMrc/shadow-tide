@@ -638,7 +638,8 @@ function update(dt) {
   const speed = P.speed * P.moveMul * (P.slowT > 0 ? 0.55 : 1);
   P.x += mv.x * speed * dt;
   P.y += mv.y * speed * dt;
-  if (mv.x || mv.y) { P.faceX = mv.x; P.faceY = mv.y; }
+  P.moving = !!(mv.x || mv.y);
+  if (P.moving) { P.faceX = mv.x; P.faceY = mv.y; }
   P.iframe -= dt;
   P.hp = Math.min(P.maxHp, P.hp + P.regen * dt);
 
@@ -1670,13 +1671,7 @@ function render() {
   }
 
   // 玩家：受傷無敵時閃爍
-  if (P.iframe <= 0 || Math.floor(P.iframe * 20) % 2 === 0) {
-    ctx.fillStyle = '#ece8f5';
-    ctx.beginPath(); ctx.arc(P.x, P.y, P.r, 0, Math.PI * 2); ctx.fill();
-    // 手上的燈（朝移動方向）
-    ctx.fillStyle = '#ffc857';
-    ctx.beginPath(); ctx.arc(P.x + P.faceX * 15, P.y + P.faceY * 15, 5, 0, Math.PI * 2); ctx.fill();
-  }
+  if (P.iframe <= 0 || Math.floor(P.iframe * 20) % 2 === 0) drawPlayer(P);
   // 守護燈罩：紫色泡泡，快結束時閃爍；燈火狂熱：金色光暈
   if (P.shieldT > 0 && (P.shieldT > 1.5 || Math.floor(P.shieldT * 8) % 2 === 0)) {
     ctx.fillStyle = 'rgba(217,184,255,.15)'; ctx.strokeStyle = 'rgba(217,184,255,.8)'; ctx.lineWidth = 2;
@@ -1822,6 +1817,95 @@ function render() {
     ctx.fillStyle = 'rgba(255,255,255,.35)';
     ctx.beginPath(); ctx.arc(stick.ox + dx * k, stick.oy + dy * k, 20, 0, Math.PI * 2); ctx.fill();
   }
+}
+
+// 提燈旅人：深藍斗篷＋兜帽，手上提著燈籠
+// 原點在角色腳底中心偏上（P.x, P.y），整個角色大約 28 寬、36 高，碰撞半徑仍是 P.r
+function drawPlayer(P) {
+  const t = game.t;
+  // 面向：依水平移動方向左右翻轉，垂直移動時維持上一次的方向
+  if (P.faceX > 0.15) P.dir = 1; else if (P.faceX < -0.15) P.dir = -1;
+  const dir = P.dir || 1;
+  const bob = P.moving ? Math.abs(Math.sin(t * 11)) * 2.5 : Math.sin(t * 2.2) * 0.7;   // 走路上下晃、站著輕微呼吸
+  const sway = P.moving ? Math.sin(t * 11) * 2.2 : Math.sin(t * 2.2) * 0.5;            // 斗篷下襬擺動
+  const swing = P.moving ? Math.sin(t * 11 + 1) * 0.35 : Math.sin(t * 2.2) * 0.08;    // 燈籠搖晃
+
+  // 腳下影子（不跟著上下晃）
+  ctx.fillStyle = 'rgba(0,0,0,.4)';
+  ctx.beginPath(); ctx.ellipse(P.x, P.y + 13, 13, 4.5, 0, 0, Math.PI * 2); ctx.fill();
+
+  ctx.save();
+  ctx.translate(P.x, P.y - bob);
+  ctx.scale(dir, 1);
+
+  // 斗篷身體：上窄下寬，下襬隨步伐左右擺
+  ctx.fillStyle = '#2f3d6b';
+  ctx.beginPath();
+  ctx.moveTo(-6, -9);
+  ctx.quadraticCurveTo(-13, 2, -12 + sway, 12);
+  ctx.quadraticCurveTo(0, 15, 12 + sway, 12);
+  ctx.quadraticCurveTo(13, 2, 6, -9);
+  ctx.closePath();
+  ctx.fill();
+  // 下襬金邊
+  ctx.strokeStyle = '#d9a441'; ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(-12 + sway, 12); ctx.quadraticCurveTo(0, 15, 12 + sway, 12);
+  ctx.stroke();
+  // 斗篷中間的開襟線
+  ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.moveTo(1, -6); ctx.lineTo(2 + sway * 0.4, 13); ctx.stroke();
+
+  // 兜帽：往後拖一個尖角
+  ctx.fillStyle = '#3a4c84';
+  ctx.beginPath();
+  ctx.moveTo(-6, -19); ctx.quadraticCurveTo(-13, -17, -12 - sway * 0.3, -9);
+  ctx.lineTo(-4, -12); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, -13, 9, 0, Math.PI * 2); ctx.fill();
+  // 兜帽裡的暗臉，只露出兩點暖光眼睛
+  ctx.fillStyle = '#100d1a';
+  ctx.beginPath(); ctx.ellipse(3, -12, 5.2, 5.8, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffe3a3';
+  ctx.beginPath();
+  ctx.arc(2.2, -12.5, 1.3, 0, Math.PI * 2);
+  ctx.arc(5.6, -12.5, 1.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 提燈的手臂與燈桿
+  ctx.strokeStyle = '#2f3d6b'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(5, -4); ctx.lineTo(11, -2); ctx.stroke();
+  ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(10, -1); ctx.lineTo(16, -9); ctx.stroke();
+  ctx.lineCap = 'butt';
+
+  // 燈籠：掛在燈桿末端，依 swing 擺動
+  ctx.save();
+  ctx.translate(16, -9);
+  ctx.rotate(swing);
+  ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 3); ctx.stroke();
+  ctx.fillStyle = '#8a5a1c';
+  ctx.fillRect(-3.5, 3, 7, 2);                 // 燈蓋
+  ctx.fillStyle = '#ffc857';
+  ctx.beginPath(); ctx.roundRect(-3.5, 5, 7, 8, 2); ctx.fill();
+  ctx.fillStyle = '#fff6d6';
+  ctx.beginPath(); ctx.ellipse(0, 9, 1.6, 2.6, 0, 0, Math.PI * 2); ctx.fill();   // 火芯
+  ctx.fillStyle = '#8a5a1c';
+  ctx.fillRect(-3.5, 13, 7, 1.5);              // 燈底
+  ctx.restore();
+
+  ctx.restore();
+
+  // 燈籠的光暈：疊加混色，照亮周圍
+  const lx = P.x + dir * 16, ly = P.y - bob;
+  const glow = ctx.createRadialGradient(lx, ly, 2, lx, ly, 70);
+  glow.addColorStop(0, 'rgba(255,200,87,.35)');
+  glow.addColorStop(1, 'rgba(255,200,87,0)');
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(lx, ly, 70, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
 }
 
 // 地面：用格子座標做固定的偽隨機，讓裝飾位置每次經過都一樣；每關換一種裝飾
