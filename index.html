@@ -204,7 +204,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const fmtTime = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 const WIN_TIME = 600;      // 撐到 10 分鐘獲勝
-const MAX_ENEMIES = 500;   // 同時存在的敵人上限，保護手機效能（模擬測過 500 隻仍很輕）
+const MAX_ENEMIES = 650;   // 同時存在的敵人上限，保護手機效能（模擬測過 500 隻仍很輕）
 
 const canvas = $('game');
 const ctx = canvas.getContext('2d');
@@ -366,20 +366,20 @@ const WEAPONS = {
   bolt: {
     name: '星光彈', icon: '✦', max: 6, kind: 'shoot',
     blurb: '自動射向最近的敵人',
-    stat: lv => ({ cd: 1.0 - 0.1 * (lv - 1), dmg: 10 + 4 * (lv - 1), count: 1 + Math.floor((lv - 1) / 2), pierce: lv >= 6 ? 3 : lv >= 4 ? 2 : 1,
-                   speed: 430, r: 5, spread: 0.16, color: '#fff3c4' }),
+    stat: lv => ({ cd: 0.6 - 0.06 * (lv - 1), dmg: 12 + 5 * (lv - 1), count: 1 + Math.floor(lv / 2), pierce: 1 + Math.ceil(lv / 2),
+                   speed: 480, r: 5, spread: 0.16, color: '#fff3c4' }),
     desc: s => `傷害 ${s.dmg} · 每 ${s.cd.toFixed(1)} 秒 ${s.count} 發 · 貫穿 ${s.pierce}`,
   },
   orbit: {
     name: '守夜燈', icon: '◉', max: 5, kind: 'orbit',
     blurb: '燈火繞著你旋轉，燒傷碰到的影子',
-    stat: lv => ({ count: lv + 1, dmg: 8 + 3 * (lv - 1), radius: 62 + 6 * lv, size: 8, spin: 3.2, hitCd: 0.45 }),
+    stat: lv => ({ count: lv + 2, dmg: 10 + 4 * (lv - 1), radius: 62 + 6 * lv, size: 9, spin: 4, hitCd: 0.35 }),
     desc: s => `${s.count} 顆燈火 · 傷害 ${s.dmg}`,
   },
   pulse: {
     name: '震光環', icon: '◎', max: 5, kind: 'pulse',
     blurb: '定期爆出光環，擊退周圍所有敵人',
-    stat: lv => ({ cd: 3.2 - 0.3 * (lv - 1), dmg: 16 + 6 * (lv - 1), radius: 100 + 15 * (lv - 1), stun: 0, color: '255,200,87' }),
+    stat: lv => ({ cd: 2.2 - 0.25 * (lv - 1), dmg: 20 + 8 * (lv - 1), radius: 110 + 18 * (lv - 1), stun: 0, color: '255,200,87' }),
     desc: s => `傷害 ${s.dmg} · 範圍 ${s.radius} · 每 ${s.cd.toFixed(1)} 秒`,
   },
 
@@ -387,18 +387,18 @@ const WEAPONS = {
   nova: {
     name: '星河', icon: '✸', max: 1, kind: 'shoot', evolved: true,
     blurb: '光彈化成星河，高速連射、無限貫穿',
-    stat: () => ({ cd: 0.28, dmg: 30, count: 2, pierce: Infinity, speed: 560, r: 7, spread: 0.08, color: '#ffc857' }),
+    stat: () => ({ cd: 0.15, dmg: 34, count: 3, pierce: Infinity, speed: 600, r: 7, spread: 0.08, color: '#ffc857' }),
   },
   crown: {
     name: '烈日冠', icon: '☀', max: 1, kind: 'orbit', evolved: true,
-    blurb: '8 顆烈日環繞，軌道一縮一放',
+    blurb: '10 顆烈日環繞，軌道一縮一放',
     // 半徑隨時間呼吸，近身和外圈都掃得到
-    stat: () => ({ count: 8, dmg: 28, radius: 105 + 40 * Math.sin(game.t * 2), size: 13, spin: 4.2, hitCd: 0.3 }),
+    stat: () => ({ count: 10, dmg: 34, radius: 105 + 40 * Math.sin(game.t * 2), size: 13, spin: 4.6, hitCd: 0.25 }),
   },
   dawn: {
     name: '破曉', icon: '✺', max: 1, kind: 'pulse', evolved: true,
     blurb: '黎明的光爆，大範圍重擊並讓影子暈眩',
-    stat: () => ({ cd: 1.6, dmg: 60, radius: 220, stun: 0.8, color: '255,244,214' }),
+    stat: () => ({ cd: 1.0, dmg: 70, radius: 240, stun: 0.8, color: '255,244,214' }),
   },
 };
 
@@ -413,8 +413,8 @@ const PASSIVES = {
   vigor:  { name: '強韌', icon: '♥', max: 5, desc: '最大生命 +20，並回復 20', apply: p => { p.maxHp += 20; p.hp = Math.min(p.maxHp, p.hp + 20); } },
   swift:  { name: '疾行', icon: '»', max: 5, desc: '移動速度 +10%', apply: p => { p.moveMul += 0.1; } },
   magnet: { name: '磁石', icon: '∪', max: 5, desc: '拾取範圍 +35%', apply: p => { p.pickup *= 1.35; } },
-  might:  { name: '力量', icon: '▲', max: 5, desc: '所有傷害 +12%', apply: p => { p.dmgMul += 0.12; } },
-  focus:  { name: '專注', icon: '◷', max: 5, desc: '攻擊冷卻 -8%', apply: p => { p.cdMul *= 0.92; } },
+  might:  { name: '力量', icon: '▲', max: 5, desc: '所有傷害 +15%', apply: p => { p.dmgMul += 0.15; } },
+  focus:  { name: '專注', icon: '◷', max: 5, desc: '攻擊冷卻 -10%', apply: p => { p.cdMul *= 0.9; } },
   regen:  { name: '再生', icon: '✚', max: 5, desc: '每秒回復 0.6 生命', apply: p => { p.regen += 0.6; } },
 };
 const MAX_WEAPONS = 4;
@@ -464,7 +464,7 @@ function newGame() {
 }
 
 // 怪變多之後經驗也多，需求跟著拉高，讓整局大約升到 40 級左右
-const xpNeed = lvl => Math.floor(5 + lvl * 6 + lvl * lvl * 0.6);
+const xpNeed = lvl => Math.floor(5 + lvl * 7 + lvl * lvl * 0.9);
 
 function addWeapon(id) {
   const w = game.weapons.find(w => w.id === id);
@@ -524,8 +524,8 @@ const viewRadius = () => Math.hypot(W, H) / 2 / zoom;
 function spawnEnemies(dt) {
   const t = game.t;
   // 成群出現：同一個方向一次湧來一小團，掃過去才有「割草」的感覺
-  game.spawnAcc += dt * Math.min(3 + t / 8, 45);
-  const group = 3 + Math.floor(Math.random() * (3 + t / 60));
+  game.spawnAcc += dt * Math.min(6 + t / 5, 70);
+  const group = 4 + Math.floor(Math.random() * (4 + t / 40));
   if (game.spawnAcc >= group) {
     game.spawnAcc -= group;
     const a = Math.random() * Math.PI * 2, d = viewRadius() + 40;
@@ -653,7 +653,7 @@ const WEAPON_UPDATE = {
     w.timer -= dt;
     if (w.timer > 0) return;
     const P = game.player;
-    const target = nearestEnemy(P.x, P.y, 520);
+    const target = nearestEnemy(P.x, P.y, 600);
     if (!target) { w.timer = 0.1; return; }
     const base = Math.atan2(target.y - P.y, target.x - P.x);
     for (let i = 0; i < s.count; i++) {
