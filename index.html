@@ -389,6 +389,8 @@ function newGame() {
     lvl: 1, xp: 0, xpNext: xpNeed(1), faceX: 1, faceY: 0,
   };
   addWeapon('bolt');
+  // 開局送一個寶箱，放在角色上方，走幾步就撿得到
+  game.gems.push({ x: 0, y: -150, v: 0, kind: 'chest', magnet: false });
   if (debug) {
     for (const id of ['bolt', 'orbit', 'pulse']) while ((game.weapons.find(w => w.id === id)?.lv || 0) < WEAPONS[id].max) addWeapon(id);
     for (const id of ['focus', 'vigor', 'might']) { game.passives[id] = 1; PASSIVES[id].apply(game.player); }
