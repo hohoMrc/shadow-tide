@@ -129,6 +129,19 @@
   @keyframes evo-pop { 0% { transform: scale(.3); opacity: 0; } 70% { transform: scale(1.2); } 100% { transform: scale(1); opacity: 1; } }
   .hint { font-size: .85rem; }
 
+  /* 欄位：已帶的顯示圖示，空格是虛線框 */
+  .slots { display: grid; gap: 6px; margin: 12px 0 0; }
+  .slot-row { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: .8rem; color: var(--dim); }
+  .slot-label { min-width: 64px; text-align: right; margin-right: 4px; }
+  .slot-label b { font-family: var(--font-gauge); color: var(--ink); font-weight: 500; }
+  .slot-row i {
+    font-style: normal; width: 24px; height: 24px; border-radius: 7px;
+    display: grid; place-items: center; font-size: 13px;
+    background: rgba(255,200,87,.12); color: var(--lamp);
+  }
+  .slot-row i.empty { background: transparent; border: 1px dashed var(--line); }
+  .slot-full { color: var(--lamp); font-size: .72rem; margin-left: 4px; min-width: 28px; }
+  .slot-row:not(.full) .slot-full { visibility: hidden; }   /* 沒滿時保留位置，兩行才會對齊 */
   .recipes { display: grid; gap: 6px; margin-bottom: 18px; font-size: .85rem; }
   .recipes div { display: flex; justify-content: center; gap: 6px; align-items: center; color: var(--dim); }
   .recipes .ok { color: var(--ink); }
@@ -173,6 +186,7 @@
   <div class="card">
     <h2>升級！</h2>
     <p style="margin:0">選一項強化</p>
+    <div class="slots" id="levelSlots"></div>
     <div class="choices" id="choices"></div>
   </div>
 </div>
@@ -197,7 +211,8 @@
 <div class="overlay" id="pauseScreen" hidden>
   <div class="card">
     <h2>暫停</h2>
-    <p>目前的流派</p>
+    <p style="margin-bottom:8px">目前的流派</p>
+    <div class="slots" id="pauseSlots" style="margin-bottom:12px"></div>
     <div class="build" id="pauseBuild"></div>
     <p style="margin-bottom:8px">進化配方</p>
     <div class="recipes" id="recipes"></div>
@@ -1369,6 +1384,7 @@ function openLevelUp() {
     };
     box.appendChild(btn);
   }
+  $('levelSlots').innerHTML = slotsHtml();
   showOnly('levelScreen');
 }
 
@@ -2035,6 +2051,19 @@ function buildHtml() {
   return items.join('');
 }
 
+// 武器與被動的欄位：已帶幾格、還剩幾格
+function slotsHtml() {
+  const row = (label, icons, max) => {
+    const full = icons.length >= max;
+    return `<div class="slot-row${full ? ' full' : ''}">
+      <span class="slot-label">${label} <b>${icons.length}/${max}</b></span>
+      ${icons.map(i => `<i>${i}</i>`).join('')}${'<i class="empty"></i>'.repeat(Math.max(0, max - icons.length))}
+      <span class="slot-full">已滿</span></div>`;
+  };
+  return row('武器', game.weapons.map(w => WEAPONS[w.id].icon), MAX_WEAPONS)
+       + row('被動', Object.keys(game.passives).map(id => PASSIVES[id].icon), MAX_PASSIVES);
+}
+
 // 每條配方的狀態：已進化 / 條件達成（等寶箱）/ 尚未達成
 function recipesHtml() {
   const ready = evolvable();
@@ -2049,6 +2078,7 @@ function togglePause() {
   if (game.mode === 'play') {
     game.mode = 'paused';
     stick.id = null;
+    $('pauseSlots').innerHTML = slotsHtml();
     $('pauseBuild').innerHTML = buildHtml();
     $('recipes').innerHTML = recipesHtml();
     showOnly('pauseScreen');
