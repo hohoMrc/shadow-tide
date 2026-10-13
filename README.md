@@ -17,6 +17,7 @@
 | `ENEMY_TYPES` / `spawnEnemies` | 敵人種類與生怪節奏 |
 | `BOSS_ATTACKS` | 魔王招式（衝撞、召喚、彈幕、重擊） |
 | `rollChoices` | 升級三選一的抽選規則 |
-| `EVOLUTIONS` / `openChest` | 武器進化配方與寶箱 |
+| `EVOLUTIONS` / `openChest` | 武器進化配方與寶箱（6 把武器、6 種進化） |
+| `MAX_WEAPONS` / `MAX_PASSIVES` | 欄位上限：武器 4 把、被動 5 種 |
 
 測試：網址後面加 `?debug`，開局就有滿級武器與配方被動、每關 20 秒、魔王血量 3 成；加 `?debug&stage=4` 從第 4 關開始。

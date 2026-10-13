@@ -354,6 +354,7 @@ const sfx = (() => {
     // 連續撿光晶，音調一個半音一個半音往上爬
     gem(n)  { if (ok('gem', 32)) { const f = 620 * 2 ** (Math.min(n, 24) / 12); tone(f, f * 1.01, 0.07, 'sine', 0.14); } },
     pulse() { tone(240, 55, 0.28, 'sine', 0.35); },
+    zap()   { if (ok('zap', 60)) tone(rand(1300, 1700), 260, 0.07, 'sawtooth', 0.07); },
     hurt()  { tone(170, 45, 0.2, 'sawtooth', 0.3); },
     elite() { tone(320, 35, 0.6, 'sawtooth', 0.35); },
     levelUp() { arp([523, 659, 784, 1047], 0.06, 0.15); },
@@ -412,6 +413,25 @@ const WEAPONS = {
     desc: s => `傷害 ${s.dmg} · 範圍 ${s.radius} · 每 ${s.cd.toFixed(1)} 秒`,
   },
 
+  chain: {
+    name: '雷鏈', icon: 'ϟ', max: 5, kind: 'chain',
+    blurb: '閃電打中敵人後，在附近的影子之間跳躍',
+    stat: lv => ({ cd: 1.4 - 0.12 * (lv - 1), dmg: 14 + 6 * (lv - 1), jumps: 2 + lv, range: 130, casts: 1 }),
+    desc: s => `傷害 ${s.dmg} · 跳躍 ${s.jumps} 次 · 每 ${s.cd.toFixed(1)} 秒`,
+  },
+  blade: {
+    name: '迴旋刃', icon: '❯', max: 5, kind: 'boomerang',
+    blurb: '朝前方丟出刀刃，飛出去再飛回來，一路切過',
+    stat: lv => ({ cd: 1.6 - 0.12 * (lv - 1), dmg: 12 + 5 * (lv - 1), count: 1 + Math.floor(lv / 2), range: 240, size: 10, spread: 0.5 }),
+    desc: s => `傷害 ${s.dmg} · ${s.count} 把 · 每 ${s.cd.toFixed(1)} 秒`,
+  },
+  flask: {
+    name: '火油瓶', icon: '♨', max: 5, kind: 'pool',
+    blurb: '朝敵人砸出火油，留下持續燃燒的火池',
+    stat: lv => ({ cd: 2.2 - 0.2 * (lv - 1), count: 1 + Math.floor((lv - 1) / 2), dmg: 6 + 3 * (lv - 1), r: 50 + 6 * lv, dur: 2.5 }),
+    desc: s => `每跳 ${s.dmg} 傷害 · ${s.count} 瓶 · 每 ${s.cd.toFixed(1)} 秒`,
+  },
+
   // ---- 進化武器：只能從寶箱得到，不會出現在升級選項裡 ----
   nova: {
     name: '星河', icon: '✸', max: 1, kind: 'shoot', evolved: true,
@@ -431,8 +451,30 @@ const WEAPONS = {
   },
 };
 
+const EVOLVED_EXTRA = {
+  storm: {
+    name: '雷暴', icon: '⚡', max: 1, kind: 'chain', evolved: true,
+    blurb: '一次劈出三道雷鏈，跳得更遠更多次',
+    stat: () => ({ cd: 0.55, dmg: 40, jumps: 10, range: 170, casts: 3 }),
+  },
+  moon: {
+    name: '月輪', icon: '☾', max: 1, kind: 'boomerang', evolved: true,
+    blurb: '四面八方同時擲出巨大月刃',
+    stat: () => ({ cd: 1.0, dmg: 38, count: 6, range: 300, size: 16, spread: Math.PI * 2 / 6 }),
+  },
+  holy: {
+    name: '聖火', icon: '✹', max: 1, kind: 'pool', evolved: true,
+    blurb: '燒不盡的聖火，站在火裡還能回血',
+    stat: () => ({ cd: 1.5, count: 4, dmg: 22, r: 95, dur: 3.5, heal: true }),
+  },
+};
+Object.assign(WEAPONS, EVOLVED_EXTRA);
+
 // 進化配方：武器滿級 + 擁有對應被動 → 撿到寶箱時進化
 const EVOLUTIONS = [
+  { from: 'chain', need: 'magnet', into: 'storm' },
+  { from: 'blade', need: 'swift',  into: 'moon' },
+  { from: 'flask', need: 'regen',  into: 'holy' },
   { from: 'bolt',  need: 'focus', into: 'nova' },
   { from: 'orbit', need: 'vigor', into: 'crown' },
   { from: 'pulse', need: 'might', into: 'dawn' },
@@ -445,8 +487,12 @@ const PASSIVES = {
   might:  { name: '力量', icon: '▲', max: 5, desc: '所有傷害 +15%', apply: p => { p.dmgMul += 0.15; } },
   focus:  { name: '專注', icon: '◷', max: 5, desc: '攻擊冷卻 -10%', apply: p => { p.cdMul *= 0.9; } },
   regen:  { name: '再生', icon: '✚', max: 5, desc: '每秒回復 0.6 生命', apply: p => { p.regen += 0.6; } },
+  area:   { name: '光域', icon: '◌', max: 5, desc: '攻擊範圍 +12%', apply: p => { p.areaMul += 0.12; } },
+  wisdom: { name: '學識', icon: '✎', max: 5, desc: '獲得經驗 +12%', apply: p => { p.xpMul += 0.12; } },
 };
+// 欄位上限：6 把武器只能帶 4 把、8 種被動只能帶 5 種，逼玩家取捨，每局流派才會不同
 const MAX_WEAPONS = 4;
+const MAX_PASSIVES = 5;
 
 // ============================================================
 //  敵人種類（ai 沒寫的就是直直追玩家）
@@ -516,12 +562,12 @@ function newGame() {
     pendingLevels: 0, pendingChests: 0, starterChest: false,
     rings: [], particles: [], texts: [], pops: [],
     combo: 0, comboT: 0, bestCombo: 0, gemCombo: 0, gemT: 0,
-    weapons: [], passives: {},
+    weapons: [], passives: {}, stardust: 0,
   });
   sfx.init();
   game.player = {
     x: 0, y: 0, r: 14, hp: 100, maxHp: 100, iframe: 0,
-    speed: 150, moveMul: 1, dmgMul: 1, cdMul: 1, pickup: 70, regen: 0,
+    speed: 150, moveMul: 1, dmgMul: 1, cdMul: 1, pickup: 70, regen: 0, areaMul: 1, xpMul: 1,
     lvl: 1, xp: 0, xpNext: xpNeed(1), faceX: 1, faceY: 0,
   };
   addWeapon('bolt');
@@ -541,7 +587,7 @@ function startStage(i) {
   Object.assign(game, {
     stage: i, st: 0, phase: 'waves', clearT: 0, boss: null,
     spawnAcc: 0, nextElite: debug ? 5 : 60, nextRing: 90,
-    enemies: [], bullets: [], gems: [], shots: [], zones: [],
+    enemies: [], bullets: [], gems: [], shots: [], zones: [], blades: [], fires: [], arcs: [],
     banner: { title: `第 ${i + 1} 關　${S.name}`, sub: S.intro, t: 0 },
   });
   setBossBar(null);
@@ -549,8 +595,8 @@ function startStage(i) {
   if (i + 1 > prog.reached) { prog.reached = i + 1; saveProgress(prog); }
 }
 
-// 怪變多之後經驗也多，需求跟著拉高
-const xpNeed = lvl => Math.floor(5 + lvl * 7 + lvl * lvl * 0.9);
+// 前期升級快（很快就有東西選），後期越來越慢，讓全部拿滿大約落在第 5 關
+const xpNeed = lvl => Math.floor(5 + lvl * 7 + lvl * lvl * 2.2);
 
 function addWeapon(id) {
   const w = game.weapons.find(w => w.id === id);
@@ -591,6 +637,7 @@ function update(dt) {
   updateEnemies(dt);
   for (const w of game.weapons) WEAPON_UPDATE[WEAPONS[w.id].kind](w, dt, WEAPONS[w.id].stat(w.lv));
   updateBullets(dt);
+  updateAreaWeapons(dt);
   updateHazards(dt);
   updateGems(dt);
   updateFx(dt);
@@ -667,7 +714,7 @@ function spawnEnemy(type, x, y, force) {
   // 血量依「整趟累積時間」成長，因為流派會一路帶到後面的關卡
   const hp = T.hp * (1 + game.t / 120);
   const color = STAGES[game.stage].colors?.[type] || T.color;
-  const e = { ...T, type, x, y, hp, maxHp: hp, color, vx: 0, vy: 0, flash: 0, orbitCd: 0, stun: 0, dead: false };
+  const e = { ...T, type, x, y, hp, maxHp: hp, color, vx: 0, vy: 0, flash: 0, orbitCd: 0, bladeCd: 0, stun: 0, dead: false };
   game.enemies.push(e);
   return e;
 }
@@ -680,7 +727,7 @@ function spawnBoss() {
     ...ENEMY_TYPES.boss, type: 'boss', name: B.name, color: B.color,
     r: B.r || 46, speed: B.speed || 70,
     x: P.x + Math.cos(a) * d, y: P.y + Math.sin(a) * d,
-    hp, maxHp: hp, vx: 0, vy: 0, flash: 0, orbitCd: 0, stun: 0, dead: false,
+    hp, maxHp: hp, vx: 0, vy: 0, flash: 0, orbitCd: 0, bladeCd: 0, stun: 0, dead: false,
     // 每招各自倒數；一開始先等 6 成冷卻，不會一出場就放招
     attacks: B.attacks.map(([id, cd]) => ({ id, cd, t: cd * 0.6 })),
     state: 'chase', stateT: 0, dirX: 0, dirY: 0, sprayRot: 0,
@@ -929,7 +976,7 @@ const WEAPON_UPDATE = {
       const a = base + (i - (s.count - 1) / 2) * s.spread;
       game.bullets.push({
         x: P.x, y: P.y, vx: Math.cos(a) * s.speed, vy: Math.sin(a) * s.speed,
-        r: s.r, color: s.color, dmg: s.dmg * P.dmgMul, pierce: s.pierce, life: 1.3, hit: new Set(),
+        r: s.r * P.areaMul, color: s.color, dmg: s.dmg * P.dmgMul, pierce: s.pierce, life: 1.3, hit: new Set(),
       });
     }
     w.timer = s.cd * P.cdMul;
@@ -938,15 +985,17 @@ const WEAPON_UPDATE = {
   orbit(w, dt, s) {
     const P = game.player;
     w.angle += s.spin * dt;
-    w.size = s.size;
+    // 光域讓燈火變大、軌道稍微變寬
+    const size = s.size * P.areaMul, radius = s.radius * (1 + (P.areaMul - 1) / 2);
+    w.size = size;
     w.orbs = [];
     for (let i = 0; i < s.count; i++) {
       const a = w.angle + i / s.count * Math.PI * 2;
-      const ox = P.x + Math.cos(a) * s.radius, oy = P.y + Math.sin(a) * s.radius;
+      const ox = P.x + Math.cos(a) * radius, oy = P.y + Math.sin(a) * radius;
       w.orbs.push({ x: ox, y: oy });
-      forNear(ox, oy, s.size + 32, e => {
+      forNear(ox, oy, size + 32, e => {
         if (e.orbitCd > game.t) return;          // 同一隻敵人一段時間內只吃一次
-        if (Math.hypot(e.x - ox, e.y - oy) < e.r + s.size + 2) {
+        if (Math.hypot(e.x - ox, e.y - oy) < e.r + size + 2) {
           const d = Math.hypot(e.x - P.x, e.y - P.y) || 1;
           hurt(e, s.dmg * P.dmgMul, (e.x - P.x) / d * 120, (e.y - P.y) / d * 120);
           e.orbitCd = game.t + s.hitCd;
@@ -958,19 +1007,123 @@ const WEAPON_UPDATE = {
   pulse(w, dt, s) {
     w.timer -= dt;
     if (w.timer > 0) return;
-    const P = game.player;
-    game.rings.push({ x: P.x, y: P.y, max: s.radius, life: 0.35, age: 0, color: s.color });
+    const P = game.player, radius = s.radius * P.areaMul;
+    game.rings.push({ x: P.x, y: P.y, max: radius, life: 0.35, age: 0, color: s.color });
     sfx.pulse();
-    forNear(P.x, P.y, s.radius + 30, e => {
+    forNear(P.x, P.y, radius + 30, e => {
       const dx = e.x - P.x, dy = e.y - P.y, d = Math.hypot(dx, dy) || 1;
-      if (d < s.radius + e.r) {
+      if (d < radius + e.r) {
         hurt(e, s.dmg * P.dmgMul, dx / d * 320, dy / d * 320);
         if (s.stun && !e.boss) e.stun = e.elite ? s.stun / 3 : s.stun;
       }
     });
     w.timer = s.cd * P.cdMul;
   },
+
+  // 雷鏈：打中第一隻後，跳到附近還沒被打過的最近敵人
+  chain(w, dt, s) {
+    w.timer -= dt;
+    if (w.timer > 0) return;
+    const P = game.player, range = s.range * P.areaMul;
+    let fired = false;
+    for (let c = 0; c < s.casts; c++) {
+      // 第一道打最近的，其餘從射程內隨機挑起點，才不會全部重疊
+      let cur = c === 0 ? nearestEnemy(P.x, P.y, 450) : randomEnemy(P.x, P.y, 450);
+      if (!cur) break;
+      fired = true;
+      const hit = new Set(), pts = [[P.x, P.y]];
+      for (let j = 0; j <= s.jumps && cur; j++) {
+        hit.add(cur);
+        pts.push([cur.x, cur.y]);
+        hurt(cur, s.dmg * P.dmgMul);
+        let next = null, nd = range * range;
+        const from = cur;
+        forNear(from.x, from.y, range, e => {
+          if (hit.has(e)) return;
+          const d = (e.x - from.x) ** 2 + (e.y - from.y) ** 2;
+          if (d < nd) { nd = d; next = e; }
+        });
+        cur = next;
+      }
+      if (game.arcs.length < 30) game.arcs.push({ pts, life: 0.15 });
+    }
+    if (fired) sfx.zap();
+    w.timer = fired ? s.cd * P.cdMul : 0.1;
+  },
+
+  // 迴旋刃：朝最近的敵人丟出，軌跡跟著玩家移動，飛出去再飛回來
+  boomerang(w, dt, s) {
+    w.timer -= dt;
+    if (w.timer > 0) return;
+    const P = game.player;
+    const t = nearestEnemy(P.x, P.y, 400);
+    const base = t ? Math.atan2(t.y - P.y, t.x - P.x) : Math.atan2(P.faceY, P.faceX);
+    for (let i = 0; i < s.count; i++) {
+      game.blades.push({
+        a: base + (i - (s.count - 1) / 2) * s.spread, age: 0, T: 1.1, x: P.x, y: P.y,
+        range: s.range * P.areaMul, size: s.size * P.areaMul, dmg: s.dmg * P.dmgMul, big: s.size > 12,
+      });
+    }
+    w.timer = s.cd * P.cdMul;
+  },
+
+  // 火油瓶：砸在隨機一隻敵人腳下，留下一段時間的火池
+  pool(w, dt, s) {
+    w.timer -= dt;
+    if (w.timer > 0) return;
+    const P = game.player;
+    for (let i = 0; i < s.count && game.fires.length < 40; i++) {
+      const t = randomEnemy(P.x, P.y, 380);
+      game.fires.push({
+        x: t ? t.x : P.x + rand(-150, 150), y: t ? t.y : P.y + rand(-150, 150),
+        r: s.r * P.areaMul, life: s.dur, tick: 0, dmg: s.dmg * P.dmgMul, heal: s.heal,
+      });
+    }
+    w.timer = s.cd * P.cdMul;
+  },
 };
+
+// 從射程內隨機挑一隻敵人（抽幾次就好，不用掃整個陣列）
+function randomEnemy(x, y, maxD) {
+  const list = game.enemies;
+  for (let i = 0; i < 12 && list.length; i++) {
+    const e = list[Math.floor(Math.random() * list.length)];
+    if (!e.dead && (e.x - x) ** 2 + (e.y - y) ** 2 < maxD * maxD) return e;
+  }
+  return nearestEnemy(x, y, maxD);
+}
+
+// 迴旋刃與火池每格的移動和傷害
+function updateAreaWeapons(dt) {
+  const P = game.player;
+  for (const b of game.blades) {
+    b.age += dt;
+    const k = Math.sin(Math.PI * Math.min(1, b.age / b.T));   // 0 → 1 → 0：飛出去再回來
+    b.x = P.x + Math.cos(b.a) * b.range * k;
+    b.y = P.y + Math.sin(b.a) * b.range * k;
+    forNear(b.x, b.y, b.size + 30, e => {
+      if (e.bladeCd > game.t) return;            // 同一隻敵人 0.25 秒內只被切一次
+      if (Math.hypot(e.x - b.x, e.y - b.y) < e.r + b.size) {
+        hurt(e, b.dmg, Math.cos(b.a) * 80, Math.sin(b.a) * 80);
+        e.bladeCd = game.t + 0.25;
+      }
+    });
+  }
+  game.blades = game.blades.filter(b => b.age < b.T);
+
+  for (const f of game.fires) {
+    f.life -= dt; f.tick -= dt;
+    if (f.tick > 0) continue;
+    f.tick = 0.3;
+    forNear(f.x, f.y, f.r + 30, e => {
+      if (Math.hypot(e.x - f.x, e.y - f.y) < f.r + e.r * 0.5) hurt(e, f.dmg);
+    });
+    if (f.heal && Math.hypot(P.x - f.x, P.y - f.y) < f.r) P.hp = Math.min(P.maxHp, P.hp + 1.5);
+  }
+  game.fires = game.fires.filter(f => f.life > 0);
+  for (const a of game.arcs) a.life -= dt;
+  game.arcs = game.arcs.filter(a => a.life > 0);
+}
 
 function updateBullets(dt) {
   for (const b of game.bullets) {
@@ -1029,7 +1182,7 @@ function updateGems(dt) {
 
 function gainXp(v) {
   const P = game.player;
-  P.xp += v;
+  P.xp += v * P.xpMul;
   while (P.xp >= P.xpNext) {
     P.xp -= P.xpNext;
     P.lvl++;
@@ -1050,8 +1203,10 @@ function rollChoices() {
     if (owned && owned.lv < W_.max) pool.push({ kind: 'weapon', id, lv: owned.lv + 1 });
     if (!owned && game.weapons.length < MAX_WEAPONS) pool.push({ kind: 'weapon', id, lv: 1 });
   }
+  const passiveCount = Object.keys(game.passives).length;
   for (const [id, P_] of Object.entries(PASSIVES)) {
     const lv = game.passives[id] || 0;
+    if (lv === 0 && passiveCount >= MAX_PASSIVES) continue;
     if (lv < P_.max) pool.push({ kind: 'passive', id, lv: lv + 1 });
   }
   for (let i = pool.length - 1; i > 0; i--) {
@@ -1059,7 +1214,8 @@ function rollChoices() {
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
   const picks = pool.slice(0, 3);
-  if (!picks.length) picks.push({ kind: 'heal' });   // 全部滿級時的保底
+  // 能拿的都拿滿了：用保底選項補滿 3 格（星屑可以無限疊）
+  for (const kind of ['stardust', 'heal']) if (picks.length < 3) picks.push({ kind });
   return picks;
 }
 
@@ -1094,8 +1250,10 @@ function openLevelUp() {
         tag = '進化素材';
         desc += `<br>${WEAPONS[evo.from].name}滿級後可進化成「${WEAPONS[evo.into].name}」`;
       }
+    } else if (c.kind === 'stardust') {
+      icon = '✧'; name = '星屑'; desc = '所有傷害 +3%（可以無限疊加）';
     } else {
-      icon = '✚'; name = '燈油'; desc = '回復 40 生命';
+      icon = '✚'; name = '熱湯'; desc = '回復 40 生命';
     }
     const btn = document.createElement('button');
     btn.className = 'choice';
@@ -1112,13 +1270,29 @@ function openLevelUp() {
 }
 
 function applyChoice(c) {
+  applyUpgrade(c);
+  continueQueue();
+}
+
+// 套用一個升級選項，回傳顯示用的文字（寶箱畫面會用到）
+function applyUpgrade(c) {
   const P = game.player;
-  if (c.kind === 'weapon') addWeapon(c.id);
-  else if (c.kind === 'passive') {
+  if (c.kind === 'weapon') {
+    addWeapon(c.id);
+    return `${WEAPONS[c.id].icon} ${WEAPONS[c.id].name} Lv.${c.lv}`;
+  }
+  if (c.kind === 'passive') {
     game.passives[c.id] = (game.passives[c.id] || 0) + 1;
     PASSIVES[c.id].apply(P);
-  } else P.hp = Math.min(P.maxHp, P.hp + 40);
-  continueQueue();
+    return `${PASSIVES[c.id].icon} ${PASSIVES[c.id].name} Lv.${c.lv}`;
+  }
+  if (c.kind === 'stardust') {
+    P.dmgMul += 0.03;
+    game.stardust = (game.stardust || 0) + 1;
+    return '✧ 星屑：所有傷害 +3%';
+  }
+  P.hp = Math.min(P.maxHp, P.hp + 40);
+  return '✚ 回復 40 生命';
 }
 
 // 依序處理還沒打開的寶箱和升級，都處理完才回到遊戲
@@ -1170,15 +1344,7 @@ function openChest() {
     burst(game.player.x, game.player.y, '#ffc857', 40);
   } else {
     // 沒有能進化的：從升級選項裡隨機送一個
-    const c = rollChoices()[0];
-    const P = game.player;
-    let label;
-    if (c.kind === 'weapon') { addWeapon(c.id); label = `${WEAPONS[c.id].icon} ${WEAPONS[c.id].name} Lv.${c.lv}`; }
-    else if (c.kind === 'passive') {
-      game.passives[c.id] = (game.passives[c.id] || 0) + 1;
-      PASSIVES[c.id].apply(P);
-      label = `${PASSIVES[c.id].icon} ${PASSIVES[c.id].name} Lv.${c.lv}`;
-    } else { P.hp = Math.min(P.maxHp, P.hp + 40); label = '✚ 回復 40 生命'; }
+    const label = applyUpgrade(rollChoices()[0]);
     $('chestTitle').textContent = '寶箱';
     html = `<p>獲得 <b style="color:var(--lamp)">${label}</b></p>
       <p class="hint">提示：武器滿級，再加上對應的被動，寶箱就會讓它進化</p>`;
@@ -1239,6 +1405,16 @@ function render() {
   ctx.translate(-P.x, -P.y);
 
   drawGround(P, S);
+
+  // 火池：橘色（聖火是金白色），邊緣微微閃動
+  for (const f of game.fires) {
+    const flick = 0.85 + 0.15 * Math.sin(game.t * 20 + f.x);
+    const fade = Math.min(1, f.life * 2);
+    ctx.fillStyle = f.heal ? `rgba(255,236,170,${0.22 * fade})` : `rgba(255,120,40,${0.22 * fade})`;
+    ctx.beginPath(); ctx.arc(f.x, f.y, f.r * flick, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = f.heal ? `rgba(255,250,220,${0.3 * fade})` : `rgba(255,190,90,${0.3 * fade})`;
+    ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.55 * flick, 0, Math.PI * 2); ctx.fill();
+  }
 
   // 魔王重擊的預告落點：紅圈慢慢填滿，滿了就落下
   for (const z of game.zones) {
@@ -1324,6 +1500,33 @@ function render() {
     }
     ctx.fillStyle = b.color;
     ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // 雷鏈：每段中間加一個隨機折點，看起來像閃電
+  ctx.lineWidth = 2.5;
+  for (const a of game.arcs) {
+    ctx.strokeStyle = `rgba(191,230,255,${a.life / 0.15})`;
+    ctx.beginPath();
+    ctx.moveTo(a.pts[0][0], a.pts[0][1]);
+    for (let i = 1; i < a.pts.length; i++) {
+      const [x0, y0] = a.pts[i - 1], [x1, y1] = a.pts[i];
+      ctx.lineTo((x0 + x1) / 2 + rand(-10, 10), (y0 + y1) / 2 + rand(-10, 10));
+      ctx.lineTo(x1, y1);
+    }
+    ctx.stroke();
+  }
+
+  // 迴旋刃：旋轉的四角星
+  for (const b of game.blades) {
+    ctx.save();
+    ctx.translate(b.x, b.y); ctx.rotate(b.age * 18);
+    ctx.fillStyle = b.big ? '#fff1c2' : '#d8e3ff';
+    const r = b.size, q = r * 0.28;
+    ctx.beginPath();
+    ctx.moveTo(r, 0); ctx.lineTo(q, q); ctx.lineTo(0, r); ctx.lineTo(-q, q);
+    ctx.lineTo(-r, 0); ctx.lineTo(-q, -q); ctx.lineTo(0, -r); ctx.lineTo(q, -q);
+    ctx.fill();
+    ctx.restore();
   }
 
   // 敵方子彈：紅色帶光暈，和自己的暖黃色光彈分得開
@@ -1566,6 +1769,7 @@ function buildHtml() {
   const items = [
     ...game.weapons.map(w => `<span>${WEAPONS[w.id].icon} ${WEAPONS[w.id].name}<em>${WEAPONS[w.id].evolved ? '★' : w.lv}</em></span>`),
     ...Object.entries(game.passives).map(([id, lv]) => `<span>${PASSIVES[id].icon} ${PASSIVES[id].name}<em>${lv}</em></span>`),
+    ...(game.stardust ? [`<span>✧ 星屑<em>×${game.stardust}</em></span>`] : []),
   ];
   return items.join('');
 }
