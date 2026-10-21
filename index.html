@@ -157,6 +157,36 @@
   .recipes .ok { color: var(--ink); }
   .recipes .ok::after { content: '✓'; color: var(--lamp); }
   .recipes .done { color: var(--lamp); }
+
+  /* ---- 金幣與強化商店 ---- */
+  .hud-sub { display: flex; justify-content: flex-end; font-family: var(--font-gauge); font-size: 14px; color: var(--lamp); margin-top: -4px; }
+  .coin-total { font-family: var(--font-gauge); color: var(--lamp); font-size: 1.1rem; margin: -6px 0 16px; }
+  .coin-total small { font-family: var(--font-body); color: var(--dim); font-size: .8rem; margin-left: 4px; }
+  .card.shop { max-width: 640px; max-height: calc(100dvh - 32px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .shop-list { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin: 0 0 16px; text-align: left; }
+  .shop-item {
+    font: inherit; color: var(--ink); text-align: left; cursor: pointer;
+    display: grid; grid-template-columns: 40px 1fr auto; gap: 2px 10px; align-items: center;
+    padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line);
+  }
+  .shop-item:not(:disabled):hover { border-color: var(--lamp); }
+  .shop-item:disabled { cursor: default; }
+  .shop-item .icon {
+    grid-row: span 2; width: 40px; height: 40px; border-radius: 10px;
+    display: grid; place-items: center; font-size: 20px; background: rgba(255,200,87,.12); color: var(--lamp);
+  }
+  .shop-item .name { font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .shop-item .desc { color: var(--dim); font-size: .8rem; grid-column: 2; }
+  .shop-item .price { grid-row: span 2; grid-column: 3; font-family: var(--font-gauge); color: var(--lamp); font-size: .95rem; white-space: nowrap; }
+  .shop-item.poor .price { color: var(--dim); }
+  .shop-item.maxed { border-color: rgba(255,200,87,.35); }
+  .shop-item.maxed .price { color: var(--dim); font-family: var(--font-body); font-size: .8rem; }
+  .pips { display: inline-flex; gap: 3px; }
+  .pips i { width: 7px; height: 7px; border-radius: 2px; background: rgba(255,255,255,.12); }
+  .pips i.on { background: var(--lamp); }
+  .shop-item.bought { animation: shop-pop .3s ease-out; }
+  @keyframes shop-pop { 50% { transform: scale(1.04); border-color: var(--lamp); } }
+  .reroll { margin-top: 12px; padding: 8px 18px; font-size: .9rem; }
 </style>
 </head>
 <body>
@@ -171,6 +201,7 @@
     <button class="pause-btn" id="muteBtn" aria-label="靜音">🔊</button>
     <button class="pause-btn" id="pauseBtn" aria-label="暫停">❚❚</button>
   </div>
+  <div class="hud-sub"><span>◆ <b id="coins">0</b></span></div>
   <div class="bossbar" id="bossBar" hidden>
     <span id="bossName"></span>
     <div><i id="bossFill"></i></div>
@@ -183,7 +214,11 @@
     <p>提著燈，穿越五個夜晚。<br>每關撐過 3 分鐘，打倒魔王，天就會亮。</p>
     <div class="stagemap" id="stageMap"></div>
     <p class="stagemap-note" id="stageNote" hidden></p>
-    <button class="btn" id="startBtn">點燈出發</button>
+    <p class="coin-total">◆ <b id="titleCoins">0</b><small>金幣</small></p>
+    <div class="btns">
+      <button class="btn" id="startBtn">點燈出發</button>
+      <button class="btn ghost" id="titleShopBtn">強化</button>
+    </div>
     <div class="controls">
       <b>電腦</b>　WASD／方向鍵移動，P 暫停<br>
       <b>手機</b>　按住畫面任一處拖曳移動<br>
@@ -198,6 +233,7 @@
     <p style="margin:0">選一項強化</p>
     <div class="slots" id="levelSlots"></div>
     <div class="choices" id="choices"></div>
+    <button class="btn ghost reroll" id="rerollBtn" hidden></button>
   </div>
 </div>
 
@@ -242,8 +278,25 @@
       <div><b id="rLvl">1</b><span>等級</span></div>
       <div><b id="rKills">0</b><span>擊殺</span></div>
     </div>
+    <p class="coin-total" id="overCoins"></p>
     <div class="build" id="overBuild"></div>
-    <button class="btn" id="againBtn">再來一局</button>
+    <div class="btns">
+      <button class="btn" id="againBtn">再來一局</button>
+      <button class="btn ghost" id="overShopBtn">強化</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="shopScreen" hidden>
+  <div class="card shop">
+    <h2>燈火強化</h2>
+    <p style="margin-bottom:6px">金幣買的強化永久有效，每一局開始時自動套用</p>
+    <p class="coin-total">◆ <b id="shopCoins">0</b><small>金幣</small></p>
+    <div class="shop-list" id="shopList"></div>
+    <div class="btns">
+      <button class="btn" id="shopBackBtn">返回</button>
+      <button class="btn ghost" id="refundBtn">全部退還</button>
+    </div>
   </div>
 </div>
 
@@ -287,6 +340,7 @@ addEventListener('keydown', e => {
     const btn = $('choices').children[Number(e.key) - 1];
     if (btn) btn.click();
   }
+  if (game.mode === 'levelup' && (e.key === 'r' || e.key === 'R')) $('rerollBtn').click();
   if (game.mode === 'chest' && (e.key === 'Enter' || e.key === ' ')) $('chestBtn').click();
   if (game.mode === 'stageclear' && (e.key === 'Enter' || e.key === ' ')) $('nextBtn').click();
 });
@@ -386,6 +440,7 @@ const sfx = (() => {
     elite() { tone(320, 35, 0.6, 'sawtooth', 0.35); },
     levelUp() { arp([523, 659, 784, 1047], 0.06, 0.15); },
     chest()   { arp([392, 523, 659, 784, 1047, 1319], 0.055, 0.2); },
+    coin()  { if (ok('coin', 40)) { tone(1320, 1320, 0.05, 'square', 0.08); tone(1760, 1760, 0.09, 'square', 0.08, 0.05); } },
   };
 })();
 
@@ -577,6 +632,48 @@ function loadProgress() {
 function saveProgress(p) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(p)); } catch (_) {} }
 
 // ============================================================
+//  局外成長：打怪掉金幣，死掉也會保留；在商店買永久強化，每局開局時套用
+//  價格：base × 1.8^目前等級（四捨五入到 5）
+// ============================================================
+const META_UPS = {
+  hp:     { name: '體魄', icon: '♥', max: 5, base: 30,  desc: lv => `最大生命 +${10 * lv}`,      apply: (p, lv) => { p.maxHp += 10 * lv; } },
+  might:  { name: '鋒芒', icon: '✶', max: 5, base: 40,  desc: lv => `所有傷害 +${5 * lv}%`,     apply: (p, lv) => { p.dmgMul += 0.05 * lv; } },
+  haste:  { name: '迅捷', icon: '◔', max: 5, base: 40,  desc: lv => `攻擊冷卻 -${3 * lv}%`,     apply: (p, lv) => { p.cdMul *= 1 - 0.03 * lv; } },
+  armor:  { name: '護甲', icon: '◈', max: 3, base: 60,  desc: lv => `受到傷害 -${lv}`,          apply: (p, lv) => { p.armor += lv; } },
+  speed:  { name: '輕足', icon: '»', max: 3, base: 30,  desc: lv => `移動速度 +${5 * lv}%`,     apply: (p, lv) => { p.moveMul += 0.05 * lv; } },
+  reach:  { name: '引力', icon: '∪', max: 3, base: 25,  desc: lv => `拾取範圍 +${15 * lv}%`,    apply: (p, lv) => { p.pickup *= 1 + 0.15 * lv; } },
+  regen:  { name: '復甦', icon: '✚', max: 3, base: 50,  desc: lv => `每秒回復 ${(0.2 * lv).toFixed(1)} 生命`, apply: (p, lv) => { p.regen += 0.2 * lv; } },
+  growth: { name: '悟性', icon: '✎', max: 5, base: 35,  desc: lv => `獲得經驗 +${5 * lv}%`,     apply: (p, lv) => { p.xpMul += 0.05 * lv; } },
+  greed:  { name: '貪婪', icon: '¤', max: 5, base: 30,  desc: lv => `獲得金幣 +${10 * lv}%`,    apply: (p, lv) => { p.coinMul += 0.1 * lv; } },
+  reroll: { name: '重抽', icon: '↻', max: 3, base: 80,  desc: lv => `每局可重抽升級選項 ${lv} 次`, apply: (p, lv) => { p.rerolls += lv; } },
+  revive: { name: '餘燼', icon: '✦', max: 1, base: 600, desc: lv => '每局可復活 1 次（回復一半生命）', apply: (p, lv) => { p.revives += lv; } },
+};
+const metaCost = (U, lv) => Math.round(U.base * 1.8 ** lv / 5) * 5;
+
+const META_KEY = 'shadowtide-meta';
+function loadMeta() {
+  try { return { coins: 0, ups: {}, ...JSON.parse(localStorage.getItem(META_KEY) || '{}') }; }
+  catch (_) { return { coins: 0, ups: {} }; }
+}
+function saveMeta() { try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (_) {} }
+const meta = loadMeta();
+
+// 把這局撿到的金幣存進存檔（死掉、過關、離開頁面時都會呼叫，重複呼叫不會多算）
+function bankCoins() {
+  if (!game.player) return;
+  // 結束一局（死掉、通關、中途重來）時才發存活獎勵，只發一次
+  if (game.mode === 'over' && !game.surviveBonus) {
+    game.surviveBonus = Math.floor(game.t / SURVIVE_SECS * game.player.coinMul);
+    game.coins += game.surviveBonus;
+  }
+  const n = Math.floor(game.coins) - game.coinsBanked;
+  if (n <= 0) return;
+  meta.coins += n;
+  game.coinsBanked += n;
+  saveMeta();
+}
+
+// ============================================================
 //  遊戲狀態
 // ============================================================
 const game = { mode: 'title' };
@@ -593,14 +690,18 @@ function newGame() {
     rings: [], particles: [], texts: [], pops: [],
     combo: 0, comboT: 0, bestCombo: 0, gemCombo: 0, gemT: 0,
     weapons: [], passives: {}, stardust: 0,
+    coins: 0, coinsBanked: 0, surviveBonus: 0,
   });
   sfx.init();
   game.player = {
     x: 0, y: 0, r: 14, hp: 100, maxHp: 100, iframe: 0,
     speed: 150, moveMul: 1, dmgMul: 1, cdMul: 1, pickup: 70, regen: 0, areaMul: 1, xpMul: 1,
-    frenzyT: 0, shieldT: 0,
+    frenzyT: 0, shieldT: 0, armor: 0, coinMul: 1, rerolls: 0, revives: 0,
     lvl: 1, xp: 0, xpNext: xpNeed(1), faceX: 1, faceY: 0,
   };
+  // 套用商店買的永久強化
+  for (const [id, U] of Object.entries(META_UPS)) if (meta.ups[id]) U.apply(game.player, meta.ups[id]);
+  game.player.hp = game.player.maxHp;
   addWeapon('bolt');
   if (debug) {
     for (const id of ['bolt', 'orbit', 'pulse']) while ((game.weapons.find(w => w.id === id)?.lv || 0) < WEAPONS[id].max) addWeapon(id);
@@ -684,7 +785,10 @@ function update(dt) {
   game.enemies = game.enemies.filter(e => !e.dead);
   game.shake = Math.max(0, game.shake - dt * 30);
 
-  if (P.hp <= 0) return endGame(false);
+  if (P.hp <= 0) {
+    if (P.revives > 0) revive();
+    else return endGame(false);
+  }
   // 寶箱優先：先進化，接下來的升級選項才會反映新武器
   if (game.pendingChests > 0) openChest();
   else if (game.pendingLevels > 0) openLevelUp();
@@ -1019,6 +1123,7 @@ function updateHazards(dt) {
 function damagePlayer(dmg) {
   const P = game.player;
   if (P.iframe > 0 || P.shieldT > 0) return;
+  dmg = Math.max(1, dmg - P.armor);
   P.hp -= dmg;
   P.iframe = 0.5;
   game.shake = 8;
@@ -1045,12 +1150,30 @@ function hurt(e, dmg, kx = 0, ky = 0) {
   if (e.boss) return bossDefeated(e);
   if (e.elite) { sfx.elite(); game.shake = 10; } else sfx.kill();
   game.gems.push({ x: e.x, y: e.y, v: e.xp, kind: 'xp', magnet: false });
+  // 小怪偶爾掉 1 枚金幣；菁英一定掉一袋
+  if (Math.random() < COIN_CHANCE) dropCoin(e.x + 8, e.y, 1);
+  if (e.elite) dropCoin(e.x, e.y + 14, 8 + game.stage * 4);
   if (e.elite) {
     game.gems.push({ x: e.x + 14, y: e.y, v: 30, kind: 'heal', magnet: false });
     game.gems.push({ x: e.x - 14, y: e.y, v: 0, kind: 'chest', magnet: false });
   }
   // 屍影死掉分裂成兩隻小的
   if (e.ai === 'split') for (const s of [-1, 1]) spawnEnemy('mite', e.x + s * 10, e.y, true);
+}
+
+// 餘燼復活：回一半血、短暫無敵，附近的小怪和子彈全部清掉
+function revive() {
+  const P = game.player;
+  P.revives--;
+  P.hp = P.maxHp * 0.5;
+  P.shieldT = 3;
+  game.shots = [];
+  game.shake = 14;
+  game.screenFlash = 1;
+  for (const e of game.enemies) if (!e.boss && Math.hypot(e.x - P.x, e.y - P.y) < 260) hurt(e, e.hp);
+  burst(P.x, P.y, '#ffc857', 60);
+  sfx.chest();
+  game.banner = { title: '餘燼復燃', sub: '燈火再次亮起', t: 0 };
 }
 
 // 魔王倒下：全場小怪一起爆掉、噴出大量光晶和寶箱
@@ -1073,8 +1196,19 @@ function bossDefeated(e) {
     game.gems.push({ x: e.x + Math.cos(a) * 40, y: e.y + Math.sin(a) * 40, v: 10 + game.stage * 5, kind: 'xp', magnet: false });
   }
   game.gems.push({ x: e.x, y: e.y, v: 0, kind: 'chest', magnet: false });
+  // 魔王掉一圈金幣袋
+  for (let i = 0; i < 6; i++) {
+    const a = (i + 0.5) / 6 * Math.PI * 2;
+    dropCoin(e.x + Math.cos(a) * 70, e.y + Math.sin(a) * 70, BOSS_COINS[game.stage] / 6);
+  }
   game.banner = { title: `擊敗 ${e.name}！`, sub: '', t: 0 };
 }
+
+// 金幣來源：小怪掉落（後期怪很多，所以機率很低）＋菁英＋魔王＋存活獎勵（每 5 秒 1 枚，新手死掉也有收入）
+const COIN_CHANCE = 0.01;
+const BOSS_COINS = [25, 50, 75, 100, 150];   // 各關魔王掉的金幣總數
+const SURVIVE_SECS = 5;
+const dropCoin = (x, y, v) => game.gems.push({ x, y, v, kind: 'coin', magnet: false });
 
 // ============================================================
 //  武器行為
@@ -1297,6 +1431,11 @@ function updateGems(dt) {
       } else if (g.kind === 'chest') {
         game.pendingChests++;
         if (g.starter) game.starterChest = true;
+      } else if (g.kind === 'coin') {
+        const v = g.v * P.coinMul;
+        game.coins += v;
+        if (g.v >= 5) addText(P.x, P.y - 30, `+${Math.round(v)} ◆`, '#ffc857', true);
+        sfx.coin();
       }
       else {
         gainXp(g.v);
@@ -1355,6 +1494,12 @@ function openLevelUp() {
   sfx.levelUp();
   levelOpenedAt = performance.now();
   stick.id = null;
+  renderChoices();
+  $('levelSlots').innerHTML = slotsHtml();
+  showOnly('levelScreen');
+}
+
+function renderChoices() {
   const box = $('choices');
   box.innerHTML = '';
   for (const c of rollChoices()) {
@@ -1395,9 +1540,16 @@ function openLevelUp() {
     };
     box.appendChild(btn);
   }
-  $('levelSlots').innerHTML = slotsHtml();
-  showOnly('levelScreen');
+  const P = game.player;
+  $('rerollBtn').hidden = !P.rerolls;
+  $('rerollBtn').textContent = `↻ 重抽（剩 ${P.rerolls} 次）`;
 }
+
+$('rerollBtn').onclick = () => {
+  if (game.mode !== 'levelup' || game.player.rerolls <= 0) return;
+  game.player.rerolls--;
+  renderChoices();
+};
 
 function applyChoice(c) {
   applyUpgrade(c);
@@ -1565,6 +1717,15 @@ function render() {
       ctx.beginPath(); ctx.arc(g.x, g.y, 22, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#8a5a1c'; ctx.fillRect(g.x - 11, g.y - 8, 22, 16);
       ctx.fillStyle = '#ffc857'; ctx.fillRect(g.x - 11, g.y - 2, 22, 3); ctx.fillRect(g.x - 2, g.y - 8, 4, 16);
+      continue;
+    }
+    if (g.kind === 'coin') {
+      // 金幣：金色圓片，袋子（數值大）畫大一點，會閃一下光
+      const r = g.v >= 5 ? 9 : 5;
+      ctx.fillStyle = '#b07a1f'; ctx.beginPath(); ctx.arc(g.x, g.y + 1, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffc857'; ctx.beginPath(); ctx.arc(g.x, g.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = `rgba(255,255,255,${0.35 + 0.35 * Math.sin(game.t * 5 + g.x)})`;
+      ctx.beginPath(); ctx.arc(g.x - r * 0.3, g.y - r * 0.3, r * 0.35, 0, Math.PI * 2); ctx.fill();
       continue;
     }
     const s = g.kind === 'heal' ? 8 : g.v >= 10 ? 7 : g.v >= 3 ? 5.5 : 4.5;
@@ -2147,7 +2308,7 @@ const DECOR = {
 // ============================================================
 //  介面
 // ============================================================
-const SCREENS = ['titleScreen', 'levelScreen', 'chestScreen', 'clearScreen', 'pauseScreen', 'overScreen'];
+const SCREENS = ['titleScreen', 'levelScreen', 'chestScreen', 'clearScreen', 'pauseScreen', 'overScreen', 'shopScreen'];
 function showOnly(id) { for (const s of SCREENS) $(s).hidden = s !== id; }
 
 const hudCache = {};
@@ -2156,6 +2317,7 @@ function updateHud() {
   const P = game.player;
   setText('lvl', P.lvl);
   setText('kills', game.kills);
+  setText('coins', Math.floor(game.coins));
   setText('stageLbl', `第 ${game.stage + 1} 關　${STAGES[game.stage].name}`);
   // 倒數到魔王出現；魔王戰中顯示「魔王」
   setText('time', game.phase === 'waves' ? fmtTime(Math.max(0, stageTime - game.st)) : game.phase === 'boss' ? '魔王' : '過關');
@@ -2189,6 +2351,7 @@ $('nextBtn').onclick = () => {
   if (performance.now() - levelOpenedAt < 250) return;
   const P = game.player;
   P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.5);
+  bankCoins();
   startStage(game.stage + 1);
   game.mode = 'play';
   last = performance.now();
@@ -2258,6 +2421,8 @@ function endGame(win) {
   setBossBar(null);
   const prog = loadProgress();
   if (win) { prog.cleared++; saveProgress(prog); }
+  bankCoins();
+  renderOverCoins();
   $('overTitle').textContent = win ? '天亮了' : '燈熄了';
   $('overTitle').style.color = win ? 'var(--lamp)' : '';
   $('overSub').textContent = (win ? '你穿越了五個夜晚。' : `最遠紀錄：第 ${prog.reached} 關`)
@@ -2269,16 +2434,87 @@ function endGame(win) {
   showOnly('overScreen');
 }
 
+// ============================================================
+//  強化商店
+// ============================================================
+let shopFrom = 'titleScreen', refundArmed = false;
+function openShop(from) {
+  shopFrom = from;
+  refundArmed = false;
+  renderShop();
+  showOnly('shopScreen');
+  $('shopScreen').firstElementChild.scrollTop = 0;
+}
+
+function renderShop(justBought) {
+  $('shopCoins').textContent = meta.coins;
+  const box = $('shopList');
+  box.innerHTML = '';
+  for (const [id, U] of Object.entries(META_UPS)) {
+    const lv = meta.ups[id] || 0, maxed = lv >= U.max, cost = metaCost(U, lv);
+    const btn = document.createElement('button');
+    btn.className = 'shop-item' + (maxed ? ' maxed' : meta.coins < cost ? ' poor' : '') + (id === justBought ? ' bought' : '');
+    btn.disabled = maxed || meta.coins < cost;
+    const pips = Array.from({ length: U.max }, (_, i) => `<i class="${i < lv ? 'on' : ''}"></i>`).join('');
+    btn.innerHTML = `<span class="icon">${U.icon}</span>
+      <span class="name">${U.name}<span class="pips">${pips}</span></span>
+      <span class="price">${maxed ? '已滿' : '◆ ' + cost}</span>
+      <span class="desc">${lv ? '目前：' + U.desc(lv) : U.desc(1)}${!maxed && lv ? `　→ ${U.desc(lv + 1)}` : ''}</span>`;
+    btn.onclick = () => {
+      if (btn.disabled) return;
+      meta.coins -= cost;
+      meta.ups[id] = lv + 1;
+      saveMeta();
+      sfx.init(); sfx.levelUp();
+      renderShop(id);
+    };
+    box.appendChild(btn);
+  }
+  const spent = Object.entries(meta.ups).reduce((sum, [id, lv]) => {
+    for (let i = 0; i < lv; i++) sum += metaCost(META_UPS[id], i);
+    return sum;
+  }, 0);
+  $('refundBtn').hidden = !spent;
+  $('refundBtn').textContent = refundArmed ? `確定退還 ◆ ${spent}？` : '全部退還';
+}
+
+// 全部退還：不跳瀏覽器確認框，改成「再按一次確認」
+$('refundBtn').onclick = () => {
+  if (!refundArmed) { refundArmed = true; return renderShop(); }
+  for (const [id, lv] of Object.entries(meta.ups)) for (let i = 0; i < lv; i++) meta.coins += metaCost(META_UPS[id], i);
+  meta.ups = {};
+  saveMeta();
+  refundArmed = false;
+  renderShop();
+};
+$('shopBackBtn').onclick = () => {
+  renderTitleCoins();
+  if (shopFrom === 'overScreen') renderOverCoins();
+  showOnly(shopFrom);
+};
+$('titleShopBtn').onclick = () => openShop('titleScreen');
+$('overShopBtn').onclick = () => openShop('overScreen');
+const renderTitleCoins = () => { $('titleCoins').textContent = meta.coins; };
+const renderOverCoins = () => {
+  $('overCoins').innerHTML = `本局獲得 ◆ <b>${game.coinsBanked}</b><small>（含存活獎勵 ${game.surviveBonus}）　共 ${meta.coins}</small>`;
+};
+renderTitleCoins();
+// 關掉分頁或切到背景時，先把這局的金幣存起來
+addEventListener('pagehide', bankCoins);
+
 $('startBtn').onclick = newGame;
 const syncMute = () => { $('muteBtn').textContent = sfx.muted ? '🔇' : '🔊'; };
 $('muteBtn').onclick = () => { sfx.toggle(); syncMute(); };
 syncMute();
 $('againBtn').onclick = newGame;
-$('quitBtn').onclick = newGame;
+$('quitBtn').onclick = () => { game.mode = 'over'; bankCoins(); newGame(); };
 $('resumeBtn').onclick = togglePause;
 $('pauseBtn').onclick = togglePause;
 // 切到別的 App 或分頁時自動暫停
-document.addEventListener('visibilitychange', () => { if (document.hidden && game.mode === 'play') togglePause(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && game.mode === 'play') togglePause();
+  if (document.hidden) bankCoins();
+});
 </script>
 </body>
 </html>
