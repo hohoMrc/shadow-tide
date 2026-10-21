@@ -21,8 +21,8 @@
 | `BOSS_ATTACKS` | 魔王招式（衝撞、召喚、彈幕、重擊） |
 | `ITEMS` / `useItem` | 地圖上隨機出現的道具 |
 | `rollChoices` | 升級三選一的抽選規則 |
-| `EVOLUTIONS` / `openChest` | 武器進化配方與寶箱（6 把武器、6 種進化） |
-| `MAX_WEAPONS` / `MAX_PASSIVES` | 欄位上限：武器 4 把、被動 5 種 |
+| `EVOLUTIONS` / `openChest` | 武器進化配方與寶箱（12 把武器、12 種進化） |
+| `MAX_WEAPONS` / `MAX_PASSIVES` | 欄位上限：武器 4 把（共 12 把）、被動 5 種（共 12 種） |
 | `CHARACTERS` / `renderChars` | 六個角色：起始武器、天賦、外型（`look`、`drawHeadgear`）、解鎖條件 |
 | `SONGS` / `music` / `updateMusic` | 背景音樂：即時合成，每個世界一首、魔王戰另一首，依狀態切換強度 |
 | `exportSave` / `importSave` | 存檔匯出／匯入（`ST1.` 開頭的存檔碼） |

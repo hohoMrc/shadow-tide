@@ -539,6 +539,8 @@ const sfx = (() => {
     elite() { tone(320, 35, 0.6, 'sawtooth', 0.35); },
     levelUp() { arp([523, 659, 784, 1047], 0.06, 0.15); },
     chest()   { arp([392, 523, 659, 784, 1047, 1319], 0.055, 0.2); },
+    meteor() { if (ok('meteor', 70)) tone(rand(260, 320), 50, 0.22, 'triangle', 0.3); },
+    slash()  { if (ok('slash', 60)) tone(rand(900, 1100), 200, 0.09, 'sawtooth', 0.08); },
     coin()  { if (ok('coin', 40)) { tone(1320, 1320, 0.05, 'square', 0.08); tone(1760, 1760, 0.09, 'square', 0.08, 0.05); } },
   };
 })();
@@ -772,8 +774,8 @@ const WEAPONS = {
   chain: {
     name: '雷鏈', icon: 'ϟ', max: 5, kind: 'chain',
     blurb: '閃電打中敵人後，在附近的影子之間跳躍',
-    stat: lv => ({ cd: 1.4 - 0.12 * (lv - 1), dmg: 14 + 6 * (lv - 1), jumps: 2 + lv, range: 130, casts: 1 }),
-    desc: s => `傷害 ${s.dmg} · 跳躍 ${s.jumps} 次 · 每 ${s.cd.toFixed(1)} 秒`,
+    stat: lv => ({ cd: 1.4 - 0.12 * (lv - 1), dmg: 18 + 8 * (lv - 1), jumps: 3 + lv, range: 130, casts: lv >= 3 ? 2 : 1 }),
+    desc: s => `傷害 ${s.dmg} · 跳躍 ${s.jumps} 次${s.casts > 1 ? ` · ${s.casts} 道` : ''} · 每 ${s.cd.toFixed(1)} 秒`,
   },
   blade: {
     name: '迴旋刃', icon: '❯', max: 5, kind: 'boomerang',
@@ -786,6 +788,44 @@ const WEAPONS = {
     blurb: '朝敵人砸出火油，留下持續燃燒的火池',
     stat: lv => ({ cd: 2.2 - 0.2 * (lv - 1), count: 1 + Math.floor((lv - 1) / 2), dmg: 6 + 3 * (lv - 1), r: 50 + 6 * lv, dur: 2.5 }),
     desc: s => `每跳 ${s.dmg} 傷害 · ${s.count} 瓶 · 每 ${s.cd.toFixed(1)} 秒`,
+  },
+
+  meteor: {
+    name: '星落', icon: '✵', max: 5, kind: 'meteor',
+    blurb: '星星從天而降，砸中一片影子',
+    stat: lv => ({ cd: 2.4 - 0.2 * (lv - 1), count: 1 + Math.floor((lv - 1) / 2), dmg: 28 + 12 * (lv - 1), r: 55 + 5 * lv, delay: 0.45 }),
+    desc: s => `傷害 ${s.dmg} · ${s.count} 顆 · 每 ${s.cd.toFixed(1)} 秒`,
+  },
+  lance: {
+    name: '冰錐', icon: '↣', max: 5, kind: 'shoot',
+    blurb: '朝移動的方向射出冰錐，打中的影子會變慢',
+    stat: lv => ({ cd: 1.0 - 0.08 * (lv - 1), dmg: 20 + 8 * (lv - 1), count: 1 + Math.floor((lv - 1) / 2), pierce: 3 + lv,
+                   speed: 520, r: 6, spread: 0.14, color: '#bfe6ff', aim: 'face', slow: 1.5, shape: 'lance', life: 1.2 }),
+    desc: s => `傷害 ${s.dmg} · ${s.count} 支 · 貫穿 ${s.pierce} · 減速`,
+  },
+  whip: {
+    name: '影鞭', icon: '∿', max: 5, kind: 'whip',
+    blurb: '左右輪流橫掃，近身傷害很高',
+    stat: lv => ({ cd: 1.3 - 0.1 * (lv - 1), dmg: 24 + 10 * (lv - 1), range: 150 + 10 * lv, h: 50, both: lv >= 3 }),
+    desc: s => `傷害 ${s.dmg} · 長度 ${s.range}${s.both ? ' · 兩側同時' : ''}`,
+  },
+  moth: {
+    name: '燈蛾', icon: 'ж', max: 5, kind: 'seeker',
+    blurb: '放出會自己追蹤敵人的飛蛾',
+    stat: lv => ({ cd: 1.6 - 0.12 * (lv - 1), count: 2 + lv, dmg: 20 + 8 * (lv - 1), speed: 260, pierce: 1 + Math.floor(lv / 2) }),
+    desc: s => `傷害 ${s.dmg} · ${s.count} 隻 · 每隻撞 ${s.pierce} 次`,
+  },
+  beam: {
+    name: '光矛', icon: '⟡', max: 5, kind: 'beam',
+    blurb: '瞬間射出一道長長的光束，打穿整排影子',
+    stat: lv => ({ cd: 2.0 - 0.2 * (lv - 1), dmg: 45 + 18 * (lv - 1), count: lv >= 4 ? 2 : 1, width: 12 + 2 * lv, len: 380 }),
+    desc: s => `傷害 ${s.dmg} · ${s.count} 道 · 每 ${s.cd.toFixed(1)} 秒`,
+  },
+  aura: {
+    name: '荊光', icon: '۞', max: 5, kind: 'aura',
+    blurb: '身邊一圈帶刺的光，持續傷害並拖慢靠近的影子',
+    stat: lv => ({ r: 70 + 8 * lv, dmg: 5 + 2.5 * (lv - 1), tick: 0.5, push: 30 }),
+    desc: s => `每 ${s.tick} 秒 ${s.dmg} 傷害 · 範圍 ${s.r} · 減速`,
   },
 
   // ---- 進化武器：只能從寶箱得到，不會出現在升級選項裡 ----
@@ -824,7 +864,39 @@ const EVOLVED_EXTRA = {
     stat: () => ({ cd: 1.5, count: 4, dmg: 22, r: 95, dur: 3.5, heal: true }),
   },
 };
-Object.assign(WEAPONS, EVOLVED_EXTRA);
+Object.assign(WEAPONS, EVOLVED_EXTRA, {
+  starfall: {
+    name: '流星雨', icon: '❃', max: 1, kind: 'meteor', evolved: true,
+    blurb: '一次落下五顆巨大流星',
+    stat: () => ({ cd: 1.0, count: 5, dmg: 75, r: 95, delay: 0.4, big: true }),
+  },
+  glacier: {
+    name: '冰河', icon: '❅', max: 1, kind: 'shoot', evolved: true,
+    blurb: '冰錐連射、無限貫穿，打中的影子直接凍住',
+    stat: () => ({ cd: 0.45, dmg: 46, count: 3, pierce: Infinity, speed: 600, r: 9, spread: 0.18, color: '#f0faff',
+                   aim: 'face', slow: 2, stun: 0.9, shape: 'lance', life: 1.2 }),
+  },
+  reaper: {
+    name: '血鐮', icon: '♆', max: 1, kind: 'whip', evolved: true,
+    blurb: '360 度橫掃，每砍中一隻就回血',
+    stat: () => ({ cd: 0.75, dmg: 64, range: 200, h: 200, circle: true, lifesteal: 1 }),
+  },
+  swarm: {
+    name: '螢火群', icon: '❋', max: 1, kind: 'seeker', evolved: true,
+    blurb: '一大群螢火蟲，每隻能連續撞好幾隻影子',
+    stat: () => ({ cd: 0.7, count: 10, dmg: 45, speed: 330, pierce: 5, gold: true }),
+  },
+  judgement: {
+    name: '天罰', icon: '⊕', max: 1, kind: 'beam', evolved: true,
+    blurb: '十字光束不斷旋轉掃射，再加一道瞄準最近敵人的光',
+    stat: () => ({ cd: 0.6, dmg: 80, width: 26, len: 520, cross: true }),
+  },
+  sanctum: {
+    name: '聖域', icon: '❂', max: 1, kind: 'aura', evolved: true,
+    blurb: '巨大的聖光領域，推開影子並為你回血',
+    stat: () => ({ r: 150, dmg: 20, tick: 0.35, push: 90, heal: 1, holy: true }),
+  },
+});
 
 // 進化配方：武器滿級 + 擁有對應被動 → 撿到寶箱時進化
 const EVOLUTIONS = [
@@ -834,6 +906,12 @@ const EVOLUTIONS = [
   { from: 'bolt',  need: 'focus', into: 'nova' },
   { from: 'orbit', need: 'vigor', into: 'crown' },
   { from: 'pulse', need: 'might', into: 'dawn' },
+  { from: 'meteor', need: 'area',     into: 'starfall' },
+  { from: 'lance',  need: 'duration', into: 'glacier' },
+  { from: 'whip',   need: 'crit',     into: 'reaper' },
+  { from: 'moth',   need: 'wisdom',   into: 'swarm' },
+  { from: 'beam',   need: 'luck',     into: 'judgement' },
+  { from: 'aura',   need: 'armor',    into: 'sanctum' },
 ];
 
 const PASSIVES = {
@@ -845,8 +923,12 @@ const PASSIVES = {
   regen:  { name: '再生', icon: '✚', max: 5, desc: '每秒回復 0.6 生命', apply: p => { p.regen += 0.6; } },
   area:   { name: '光域', icon: '◌', max: 5, desc: '攻擊範圍 +12%', apply: p => { p.areaMul += 0.12; } },
   wisdom: { name: '學識', icon: '✎', max: 5, desc: '獲得經驗 +12%', apply: p => { p.xpMul += 0.12; } },
+  crit:     { name: '會心', icon: '❖', max: 5, desc: '8% 機率造成兩倍傷害', apply: p => { p.crit += 0.08; } },
+  duration: { name: '恆燃', icon: '⧗', max: 5, desc: '火池、減速、暈眩、道具效果持續時間 +15%', apply: p => { p.durMul += 0.15; } },
+  armor:    { name: '鐵衣', icon: '▣', max: 3, desc: '受到傷害 -1', apply: p => { p.armor += 1; } },
+  luck:     { name: '幸運', icon: '♣', max: 5, desc: '道具出現頻率 +12%、金幣 +10%', apply: p => { p.luck += 0.12; p.coinMul += 0.1; } },
 };
-// 欄位上限：6 把武器只能帶 4 把、8 種被動只能帶 5 種，逼玩家取捨，每局流派才會不同
+// 欄位上限：12 把武器只能帶 4 把、12 種被動只能帶 5 種，逼玩家取捨，每局流派才會不同
 const MAX_WEAPONS = 4;
 const MAX_PASSIVES = 5;
 
@@ -1027,6 +1109,7 @@ function newGame(world = game.world || 0) {
   Object.assign(game, {
     mode: 'play', world, t: 0, kills: 0, shake: 0,
     enemies: [], bullets: [], gems: [], shots: [], zones: [], blades: [], fires: [], arcs: [],
+    meteors: [], slashes: [], moths: [], beams: [],
     items: [], freezeT: 0, screenFlash: 0,
     pendingLevels: 0, pendingChests: 0, starterChest: false,
     rings: [], particles: [], texts: [], pops: [],
@@ -1039,7 +1122,7 @@ function newGame(world = game.world || 0) {
   game.player = {
     x: 0, y: 0, r: 14, hp: 100, maxHp: 100, iframe: 0,
     speed: 150, moveMul: 1, dmgMul: 1, cdMul: 1, pickup: 70, regen: 0, areaMul: 1, xpMul: 1,
-    frenzyT: 0, shieldT: 0, armor: 0, coinMul: 1, rerolls: 0, revives: 0,
+    frenzyT: 0, shieldT: 0, armor: 0, coinMul: 1, rerolls: 0, revives: 0, crit: 0, durMul: 1, luck: 0,
     lvl: 1, xp: 0, xpNext: xpNeed(1), faceX: 1, faceY: 0,
   };
   // 套用角色天賦和商店買的永久強化
@@ -1272,6 +1355,8 @@ function updateEnemies(dt) {
     else if (e.ai === 'spit') spitterAI(e, dt, d, mv);
     else if (e.ai === 'charge') chargerAI(e, dt, d, mv);
     else if (e.ai === 'boss') bossAI(e, dt, d, mv);
+    // 被冰錐、荊光拖慢（魔王只慢一點點）
+    if (e.slowT > 0) { e.slowT -= dt; mv.sp *= e.boss ? 0.85 : 0.5; }
     // 暈眩中不會移動，但仍會被擊退
     if (e.stun > 0) mv.sp = 0;
     e.stun -= dt;
@@ -1394,7 +1479,7 @@ const ITEM_RATE = [
   { min: 11, max: 19, cap: 4 },
   { min: 8,  max: 14, cap: 5 },   // X-5
 ];
-const nextItemDelay = () => { const R = ITEM_RATE[game.sub]; return rand(R.min, R.max); };
+const nextItemDelay = () => { const R = ITEM_RATE[game.sub]; return rand(R.min, R.max) / (1 + (game.player.luck || 0)); };
 
 function updateItems(dt) {
   const P = game.player;
@@ -1434,9 +1519,9 @@ function useItem(kind) {
   burst(P.x, P.y, I.color, 16);
   if (kind === 'soup') P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.3);
   else if (kind === 'vacuum') for (const g of game.gems) g.magnet = true;
-  else if (kind === 'freeze') game.freezeT = 4;
-  else if (kind === 'frenzy') P.frenzyT = 8;
-  else if (kind === 'shield') P.shieldT = 6;
+  else if (kind === 'freeze') game.freezeT = 4 * P.durMul;
+  else if (kind === 'frenzy') P.frenzyT = 8 * P.durMul;
+  else if (kind === 'shield') P.shieldT = 6 * P.durMul;
   else if (kind === 'bomb') {
     // 畫面內的小怪全部擊殺（照常掉經驗），魔王扣 8% 血
     const R = viewRadius();
@@ -1496,12 +1581,14 @@ function damagePlayer(dmg) {
 
 function hurt(e, dmg, kx = 0, ky = 0) {
   if (e.dead) return;
+  const crit = game.player.crit > 0 && Math.random() < game.player.crit;
+  if (crit) dmg *= 2;
   e.hp -= dmg;
   e.flash = 0.08;
   // 菁英比較難推，魔王推不動
   const kb = e.boss ? 0 : e.elite ? 0.2 : 1;
   e.vx += kx * kb; e.vy += ky * kb;
-  addText(e.x, e.y - e.r, Math.round(dmg), '#fff');
+  addText(e.x, e.y - e.r, Math.round(dmg) + (crit ? '!' : ''), crit ? '#ffd65a' : '#fff');
   if (e.hp > 0) { sfx.hit(); return; }
 
   e.dead = true;
@@ -1609,15 +1696,20 @@ const WEAPON_UPDATE = {
     const P = game.player;
     // 魔王戰時每隔一輪鎖定魔王，不然子彈全被周圍的小怪吃掉
     w.volley = (w.volley || 0) + 1;
-    const boss = game.boss;
-    const target = boss && w.volley % 2 && Math.hypot(boss.x - P.x, boss.y - P.y) < 600 ? boss : nearestEnemy(P.x, P.y, 600);
-    if (!target) { w.timer = 0.1; return; }
-    const base = Math.atan2(target.y - P.y, target.x - P.x);
+    let base;
+    if (s.aim === 'face') base = Math.atan2(P.faceY, P.faceX);   // 冰錐：朝移動方向，不自動瞄準
+    else {
+      const boss = game.boss;
+      const target = boss && w.volley % 2 && Math.hypot(boss.x - P.x, boss.y - P.y) < 600 ? boss : nearestEnemy(P.x, P.y, 600);
+      if (!target) { w.timer = 0.1; return; }
+      base = Math.atan2(target.y - P.y, target.x - P.x);
+    }
     for (let i = 0; i < s.count; i++) {
       const a = base + (i - (s.count - 1) / 2) * s.spread;
       game.bullets.push({
         x: P.x, y: P.y, vx: Math.cos(a) * s.speed, vy: Math.sin(a) * s.speed,
-        r: s.r * P.areaMul, color: s.color, dmg: s.dmg * P.dmgMul, pierce: s.pierce, life: 1.3, hit: new Set(),
+        r: s.r * P.areaMul, color: s.color, dmg: s.dmg * P.dmgMul, pierce: s.pierce, life: s.life || 1.3, hit: new Set(),
+        slow: (s.slow || 0) * P.durMul, stun: (s.stun || 0) * P.durMul, shape: s.shape,
       });
     }
     w.timer = s.cd * P.cdMul;
@@ -1655,7 +1747,7 @@ const WEAPON_UPDATE = {
       const dx = e.x - P.x, dy = e.y - P.y, d = Math.hypot(dx, dy) || 1;
       if (d < radius + e.r) {
         hurt(e, s.dmg * P.dmgMul, dx / d * 320, dy / d * 320);
-        if (s.stun && !e.boss) e.stun = e.elite ? s.stun / 3 : s.stun;
+        if (s.stun && !e.boss) e.stun = (e.elite ? s.stun / 3 : s.stun) * P.durMul;
       }
     });
     w.timer = s.cd * P.cdMul;
@@ -1717,12 +1809,127 @@ const WEAPON_UPDATE = {
       const t = randomEnemy(P.x, P.y, 380);
       game.fires.push({
         x: t ? t.x : P.x + rand(-150, 150), y: t ? t.y : P.y + rand(-150, 150),
-        r: s.r * P.areaMul, life: s.dur, tick: 0, dmg: s.dmg * P.dmgMul, heal: s.heal,
+        r: s.r * P.areaMul, life: s.dur * P.durMul, tick: 0, dmg: s.dmg * P.dmgMul, heal: s.heal,
       });
     }
     w.timer = s.cd * P.cdMul;
   },
 };
+
+// 星落：在敵人腳下標出落點，短暫延遲後砸下
+WEAPON_UPDATE.meteor = (w, dt, s) => {
+  w.timer -= dt;
+  if (w.timer > 0) return;
+  const P = game.player;
+  for (let i = 0; i < s.count && game.meteors.length < 40; i++) {
+    const t = randomEnemy(P.x, P.y, 420);
+    game.meteors.push({
+      x: t ? t.x : P.x + rand(-200, 200), y: t ? t.y : P.y + rand(-200, 200),
+      r: s.r * P.areaMul, dmg: s.dmg * P.dmgMul, t: s.delay + i * 0.08, delay: s.delay + i * 0.08, big: !!s.big,
+    });
+  }
+  w.timer = s.cd * P.cdMul;
+};
+
+// 影鞭：在角色左右兩側的橢圓範圍內橫掃；血鐮是整圈
+WEAPON_UPDATE.whip = (w, dt, s) => {
+  w.timer -= dt;
+  if (w.timer > 0) return;
+  const P = game.player, dir = P.dir || 1;
+  const range = s.range * P.areaMul, h = s.h * P.areaMul;
+  const sides = s.circle ? [0] : s.both ? [dir, -dir] : [w.flip ? -dir : dir];
+  w.flip = !w.flip;
+  let healed = 0;
+  for (const side of sides) {
+    const cx = P.x + side * range / 2, cy = P.y - 4;
+    const rx = s.circle ? range : range / 2, ry = s.circle ? range : h / 2;
+    game.slashes.push({ x: cx, y: cy, rx, ry, side, life: 0.22, max: 0.22, circle: !!s.circle });
+    forNear(cx, cy, Math.max(rx, ry) + 30, e => {
+      const nx = (e.x - cx) / (rx + e.r), ny = (e.y - cy) / (ry + e.r);
+      if (nx * nx + ny * ny > 1) return;
+      const d = Math.hypot(e.x - P.x, e.y - P.y) || 1;
+      hurt(e, s.dmg * P.dmgMul, (e.x - P.x) / d * 160, (e.y - P.y) / d * 160);
+      if (s.lifesteal && healed < 8) { healed++; P.hp = Math.min(P.maxHp, P.hp + s.lifesteal); }   // 一次最多回 8
+    });
+  }
+  sfx.slash();
+  w.timer = s.cd * P.cdMul;
+};
+
+// 燈蛾：往四周飛出，自己找最近的敵人追過去
+WEAPON_UPDATE.seeker = (w, dt, s) => {
+  w.timer -= dt;
+  if (w.timer > 0) return;
+  const P = game.player;
+  for (let i = 0; i < s.count && game.moths.length < 80; i++) {
+    const a = i / s.count * Math.PI * 2 + rand(-0.3, 0.3);
+    game.moths.push({
+      x: P.x, y: P.y, vx: Math.cos(a) * s.speed, vy: Math.sin(a) * s.speed, speed: s.speed,
+      life: 2.5 * P.durMul, dmg: s.dmg * P.dmgMul, hits: s.pierce, target: null, hit: new Set(), gold: !!s.gold, seed: Math.random() * 10,
+    });
+  }
+  w.timer = s.cd * P.cdMul;
+};
+
+// 光矛：朝最近的敵人瞬間射出一條線，線上的全部打到；天罰是旋轉的十字
+WEAPON_UPDATE.beam = (w, dt, s) => {
+  w.timer -= dt;
+  if (w.timer > 0) return;
+  const P = game.player, len = s.len * P.areaMul, width = s.width * P.areaMul;
+  let angles;
+  if (s.cross) {
+    w.angle = (w.angle || 0) + 0.35;
+    angles = [0, 1, 2, 3].map(i => w.angle + i * Math.PI / 2);
+    const t = nearestEnemy(P.x, P.y, len);
+    if (t) angles.push(Math.atan2(t.y - P.y, t.x - P.x));
+  } else {
+    const t = nearestEnemy(P.x, P.y, len);
+    if (!t) { w.timer = 0.1; return; }
+    angles = [Math.atan2(t.y - P.y, t.x - P.x)];
+    const t2 = s.count > 1 && randomEnemy(P.x, P.y, len);
+    if (t2 && t2 !== t) angles.push(Math.atan2(t2.y - P.y, t2.x - P.x));
+  }
+  for (const a of angles) {
+    const c = Math.cos(a), sn = Math.sin(a);
+    game.beams.push({ x1: P.x, y1: P.y, x2: P.x + c * len, y2: P.y + sn * len, w: width, life: 0.25, max: 0.25, gold: !!s.cross });
+    for (const e of game.enemies) {
+      if (e.dead) continue;
+      const px = e.x - P.x, py = e.y - P.y, along = px * c + py * sn;
+      if (along < 0 || along > len) continue;
+      if (Math.abs(py * c - px * sn) < width / 2 + e.r) hurt(e, s.dmg * P.dmgMul, c * 60, sn * 60);
+    }
+  }
+  sfx.zap();
+  w.timer = s.cd * P.cdMul;
+};
+
+// 荊光：一直跟著玩家的光場，每隔一下打一次、拖慢範圍內的敵人
+WEAPON_UPDATE.aura = (w, dt, s) => {
+  const P = game.player;
+  w.r = s.r * P.areaMul; w.holy = !!s.holy;
+  w.timer -= dt;
+  if (w.timer > 0) return;
+  w.timer = s.tick * P.cdMul;
+  let n = 0;
+  forNear(P.x, P.y, w.r + 30, e => {
+    const dx = e.x - P.x, dy = e.y - P.y, d = Math.hypot(dx, dy) || 1;
+    if (d > w.r + e.r) return;
+    hurt(e, s.dmg * P.dmgMul, dx / d * s.push, dy / d * s.push);
+    e.slowT = Math.max(e.slowT || 0, 0.6 * P.durMul);
+    n++;
+  });
+  if (s.heal && n) P.hp = Math.min(P.maxHp, P.hp + s.heal);
+};
+
+// 只查附近格子的最近敵人（燈蛾很多隻，不能每隻都掃整個陣列）
+function nearestNear(x, y, r) {
+  let best = null, bd = r * r;
+  forNear(x, y, r, e => {
+    const d = (e.x - x) ** 2 + (e.y - y) ** 2;
+    if (d < bd) { bd = d; best = e; }
+  });
+  return best;
+}
 
 // 從射程內隨機挑一隻敵人（抽幾次就好，不用掃整個陣列）
 function randomEnemy(x, y, maxD) {
@@ -1764,6 +1971,45 @@ function updateAreaWeapons(dt) {
   game.fires = game.fires.filter(f => f.life > 0);
   for (const a of game.arcs) a.life -= dt;
   game.arcs = game.arcs.filter(a => a.life > 0);
+
+  for (const m of game.meteors) {
+    m.t -= dt;
+    if (m.t > 0) continue;
+    forNear(m.x, m.y, m.r + 30, e => {
+      const dx = e.x - m.x, dy = e.y - m.y, d = Math.hypot(dx, dy) || 1;
+      if (d < m.r + e.r) hurt(e, m.dmg, dx / d * 200, dy / d * 200);
+    });
+    game.rings.push({ x: m.x, y: m.y, max: m.r, life: 0.3, age: 0, color: '255,214,140' });
+    burst(m.x, m.y, '#ffd68c', m.big ? 14 : 8);
+    game.shake = Math.max(game.shake, m.big ? 5 : 3);
+    sfx.meteor();
+  }
+  game.meteors = game.meteors.filter(m => m.t > 0);
+
+  for (const m of game.moths) {
+    m.life -= dt;
+    if (!m.target || m.target.dead) m.target = nearestNear(m.x, m.y, 260);
+    if (m.target) {
+      // 往目標轉彎（不是瞬間轉向，看起來才像在飛）
+      const dx = m.target.x - m.x, dy = m.target.y - m.y, d = Math.hypot(dx, dy) || 1;
+      const k = Math.min(1, 7 * dt);
+      m.vx += (dx / d * m.speed - m.vx) * k;
+      m.vy += (dy / d * m.speed - m.vy) * k;
+    }
+    m.x += m.vx * dt; m.y += m.vy * dt;
+    forNear(m.x, m.y, 30, e => {
+      if (m.hit.has(e) || Math.hypot(e.x - m.x, e.y - m.y) > e.r + 5) return;
+      hurt(e, m.dmg, m.vx * 0.2, m.vy * 0.2);
+      m.hit.add(e); m.target = null;
+      if (--m.hits <= 0) { m.life = 0; return true; }
+    });
+  }
+  game.moths = game.moths.filter(m => m.life > 0);
+
+  for (const x of game.slashes) x.life -= dt;
+  game.slashes = game.slashes.filter(x => x.life > 0);
+  for (const b of game.beams) b.life -= dt;
+  game.beams = game.beams.filter(b => b.life > 0);
 }
 
 function updateBullets(dt) {
@@ -1774,6 +2020,8 @@ function updateBullets(dt) {
       if (b.hit.has(e)) return;
       if (Math.hypot(e.x - b.x, e.y - b.y) < e.r + b.r) {
         hurt(e, b.dmg, b.vx * 0.15, b.vy * 0.15);
+        if (b.slow) e.slowT = Math.max(e.slowT || 0, b.slow);
+        if (b.stun && !e.boss) e.stun = e.elite ? b.stun / 3 : b.stun;
         b.hit.add(e);
         if (--b.pierce <= 0) { b.life = 0; return true; }
       }
@@ -2078,6 +2326,30 @@ function render() {
     ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.55 * flick, 0, Math.PI * 2); ctx.fill();
   }
 
+  // 荊光／聖域：玩家腳下的光場，外圈虛線慢慢轉
+  for (const w of game.weapons) if (WEAPONS[w.id].kind === 'aura' && w.r) {
+    const col = w.holy ? '255,240,190' : '150,255,190';
+    ctx.fillStyle = `rgba(${col},${0.07 + 0.03 * Math.sin(game.t * 4)})`;
+    ctx.beginPath(); ctx.arc(P.x, P.y, w.r, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.strokeStyle = `rgba(${col},.45)`; ctx.lineWidth = 2;
+    ctx.setLineDash([6, 10]); ctx.lineDashOffset = -game.t * 30;
+    ctx.beginPath(); ctx.arc(P.x, P.y, w.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  // 星落的落點：圈慢慢縮小，星星從右上方掉下來
+  for (const m of game.meteors) {
+    const k = 1 - m.t / m.delay;   // 0 → 1
+    ctx.strokeStyle = `rgba(255,214,140,${0.25 + 0.5 * k})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r * (1.2 - 0.2 * k), 0, Math.PI * 2); ctx.stroke();
+    const fx = m.x + 120 * (1 - k), fy = m.y - 320 * (1 - k), sz = m.big ? 11 : 7;
+    ctx.strokeStyle = 'rgba(255,230,170,.5)'; ctx.lineWidth = sz;
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx + 30, fy - 80); ctx.stroke();
+    ctx.fillStyle = '#fff1c2';
+    ctx.beginPath(); ctx.arc(fx, fy, sz, 0, Math.PI * 2); ctx.fill();
+  }
+
   // 魔王重擊的預告落點：紅圈慢慢填滿，滿了就落下
   for (const z of game.zones) {
     const k = z.age / z.delay;
@@ -2172,8 +2444,17 @@ function render() {
     ctx.beginPath(); ctx.arc(o.x, o.y, w.size, 0, Math.PI * 2); ctx.fill();
   }
 
-  // 光彈：進化後的星河多一條拖尾
+  // 光彈：進化後的星河多一條拖尾；冰錐畫成細長的冰晶
   for (const b of game.bullets) {
+    if (b.shape === 'lance') {
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx));
+      ctx.fillStyle = 'rgba(160,215,255,.3)';
+      ctx.beginPath(); ctx.ellipse(0, 0, b.r * 3.2, b.r * 1.2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = b.color;
+      ctx.beginPath(); ctx.moveTo(b.r * 3, 0); ctx.lineTo(0, b.r * 0.6); ctx.lineTo(-b.r * 2.4, 0); ctx.lineTo(0, -b.r * 0.6); ctx.fill();
+      ctx.restore();
+      continue;
+    }
     if (b.r > 5) {
       ctx.strokeStyle = 'rgba(255,200,87,.35)'; ctx.lineWidth = b.r;
       ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - b.vx * 0.05, b.y - b.vy * 0.05); ctx.stroke();
@@ -2194,6 +2475,43 @@ function render() {
       ctx.lineTo(x1, y1);
     }
     ctx.stroke();
+  }
+
+  // 影鞭：半透明的弧形刀光，很快淡掉；血鐮是紅色整圈
+  for (const x of game.slashes) {
+    const k = x.life / x.max;
+    ctx.save();
+    ctx.translate(x.x, x.y);
+    ctx.fillStyle = x.circle ? `rgba(255,90,110,${0.22 * k})` : `rgba(190,170,255,${0.25 * k})`;
+    ctx.strokeStyle = x.circle ? `rgba(255,170,180,${0.8 * k})` : `rgba(235,225,255,${0.8 * k})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    if (x.circle) ctx.arc(0, 0, x.rx * (1.05 - 0.15 * k), 0, Math.PI * 2);
+    else ctx.ellipse(0, 0, x.rx, x.ry * (0.4 + 0.6 * k), 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  // 光矛：一條很亮的光，寬度隨時間收細
+  for (const b of game.beams) {
+    const k = b.life / b.max;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = b.gold ? `rgba(255,220,120,${0.35 * k})` : `rgba(140,220,255,${0.35 * k})`;
+    ctx.lineWidth = b.w * 1.8 * k;
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+    ctx.strokeStyle = `rgba(255,255,255,${0.9 * k})`;
+    ctx.lineWidth = b.w * 0.45 * k;
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+    ctx.lineCap = 'butt';
+  }
+
+  // 燈蛾／螢火群：一閃一閃的小光點，兩片翅膀拍動
+  for (const m of game.moths) {
+    const flap = Math.abs(Math.sin(game.t * 30 + m.seed)) * 4 + 1;
+    ctx.fillStyle = m.gold ? 'rgba(170,255,200,.35)' : 'rgba(255,233,168,.35)';
+    ctx.beginPath(); ctx.ellipse(m.x - 3, m.y, flap, 3, 0.5, 0, Math.PI * 2); ctx.ellipse(m.x + 3, m.y, flap, 3, -0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = m.gold ? '#c8ffd8' : '#ffe9a8';
+    ctx.beginPath(); ctx.arc(m.x, m.y, 2.6, 0, Math.PI * 2); ctx.fill();
   }
 
   // 迴旋刃：旋轉的四角星
@@ -2836,7 +3154,9 @@ function slotsHtml() {
 // 每條配方的狀態：已進化 / 條件達成（等寶箱）/ 尚未達成
 function recipesHtml() {
   const ready = evolvable();
-  return EVOLUTIONS.map(r => {
+  // 12 條全列太長：只列手上武器的配方
+  const mine = EVOLUTIONS.filter(r => game.weapons.some(w => w.id === r.from || w.id === r.into));
+  return mine.map(r => {
     const F = WEAPONS[r.from], N = PASSIVES[r.need], T = WEAPONS[r.into];
     const cls = game.weapons.some(w => w.id === r.into) ? 'done' : ready.includes(r) ? 'ok' : '';
     return `<div class="${cls}">${F.icon} ${F.name} Lv.${F.max} ＋ ${N.icon} ${N.name} → ${T.icon} ${T.name}</div>`;
