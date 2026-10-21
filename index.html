@@ -222,6 +222,11 @@
   .save-msg.ok { color: #7dff9b; }
   .save-msg.err { color: var(--hp); }
   .card h3 { margin: 16px 0 6px; font-size: 1rem; }
+  .card.scroll { max-height: calc(100dvh - 32px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .vols { display: grid; gap: 8px; margin: 0 auto 16px; max-width: 320px; }
+  .vols label { display: flex; align-items: center; gap: 10px; font-size: .9rem; color: var(--dim); }
+  .vols input { flex: 1; accent-color: var(--lamp); touch-action: pan-x; }
+  .vols b { width: 3ch; text-align: right; font: 500 .85rem var(--font-gauge); color: var(--ink); }
 </style>
 </head>
 <body>
@@ -255,7 +260,7 @@
     <div class="btns" style="margin-top:10px">
       <button class="btn ghost" id="charBtn">角色</button>
       <button class="btn ghost" id="titleShopBtn">強化</button>
-      <button class="btn ghost" id="saveBtn">存檔</button>
+      <button class="btn ghost" id="saveBtn">設定</button>
     </div>
     <div class="controls">
       <b>電腦</b>　WASD／方向鍵移動，P 暫停<br>
@@ -293,13 +298,17 @@
 </div>
 
 <div class="overlay" id="pauseScreen" hidden>
-  <div class="card">
+  <div class="card scroll">
     <h2>暫停</h2>
     <p style="margin-bottom:8px">目前的流派</p>
     <div class="slots" id="pauseSlots" style="margin-bottom:12px"></div>
     <div class="build" id="pauseBuild"></div>
     <p style="margin-bottom:8px">進化配方</p>
     <div class="recipes" id="recipes"></div>
+    <div class="vols">
+      <label><span>音樂</span><input type="range" class="vol-music" min="0" max="100"><b class="vol-music-n"></b></label>
+      <label><span>音效</span><input type="range" class="vol-sfx" min="0" max="100"><b class="vol-sfx-n"></b></label>
+    </div>
     <div class="btns">
       <button class="btn" id="resumeBtn">繼續</button>
       <button class="btn ghost" id="quitBtn">重新開始</button>
@@ -339,7 +348,13 @@
 
 <div class="overlay" id="saveScreen" hidden>
   <div class="card">
-    <h2>存檔</h2>
+    <h2>設定</h2>
+    <h3>音量</h3>
+    <div class="vols">
+      <label><span>音樂</span><input type="range" class="vol-music" min="0" max="100"><b class="vol-music-n"></b></label>
+      <label><span>音效</span><input type="range" class="vol-sfx" min="0" max="100"><b class="vol-sfx-n"></b></label>
+    </div>
+    <h3>存檔</h3>
     <p style="margin-bottom:8px">存檔在這個瀏覽器裡。要換手機或電腦玩，<br>把存檔碼複製過去貼上就好。</p>
     <h3>匯出</h3>
     <textarea class="save-code" id="exportCode" readonly></textarea>
@@ -449,8 +464,16 @@ function readMove() {
 // ============================================================
 //  音效：用 Web Audio 即時合成，不需要音檔
 // ============================================================
+const VOL_KEY = 'shadowtide-vol';
+const vols = (() => {
+  try { return { music: 0.6, sfx: 1, ...JSON.parse(localStorage.getItem(VOL_KEY) || '{}') }; }
+  catch (_) { return { music: 0.6, sfx: 1 }; }
+})();
+
 const sfx = (() => {
-  let ac = null, master = null, muted = false;
+  // 聲音路線：音效 → sfxBus ┐
+  //          音樂 → musicBus ┴→ master（靜音鍵）→ 喇叭
+  let ac = null, master = null, sfxBus = null, musicBus = null, muted = false;
   try { muted = localStorage.getItem('shadowtide-mute') === '1'; } catch (_) {}
   const VOL = 0.3;
   const lastAt = {};
@@ -463,6 +486,9 @@ const sfx = (() => {
     master = ac.createGain();
     master.gain.value = muted ? 0 : VOL;
     master.connect(ac.destination);
+    sfxBus = ac.createGain(); sfxBus.gain.value = vols.sfx; sfxBus.connect(master);
+    musicBus = ac.createGain(); musicBus.gain.value = vols.music; musicBus.connect(master);
+    music.start(ac, musicBus);
   }
   // 同一種音效限制頻率：幾百隻怪同時死也不會爆音
   function ok(name, gapMs) {
@@ -480,13 +506,21 @@ const sfx = (() => {
     o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t0 + dur);
     g.gain.setValueAtTime(vol, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
-    o.connect(g).connect(master);
+    o.connect(g).connect(sfxBus);
     o.start(t0); o.stop(t0 + dur + 0.02);
   }
   const arp = (notes, step, dur) => notes.forEach((f, i) => tone(f, f, dur, 'triangle', 0.28, i * step));
   return {
     init,
+    get ac() { return ac; },
     get muted() { return muted; },
+    // 調音量（0～1）：kind 是 'music' 或 'sfx'
+    setVol(kind, v) {
+      vols[kind] = v;
+      const bus = kind === 'music' ? musicBus : sfxBus;
+      if (bus) bus.gain.setTargetAtTime(v, ac.currentTime, 0.05);
+      try { localStorage.setItem(VOL_KEY, JSON.stringify(vols)); } catch (_) {}
+    },
     toggle() {
       muted = !muted;
       if (master) master.gain.value = muted ? 0 : VOL;
@@ -508,6 +542,181 @@ const sfx = (() => {
     coin()  { if (ok('coin', 40)) { tone(1320, 1320, 0.05, 'square', 0.08); tone(1760, 1760, 0.09, 'square', 0.08, 0.05); } },
   };
 })();
+
+// ============================================================
+//  背景音樂：即時合成，不用音樂檔
+//  以 16 分音符為一步、16 步一小節；和弦進行 4 小節一輪
+//  強度 level：0 標題（安靜）、1 一般、2 影潮來襲、3 魔王戰
+//  排程方式：每 25ms 檢查一次，把接下來 0.12 秒內要響的音先排進 AudioContext
+// ============================================================
+const SCALES = {
+  minor:    [0, 2, 3, 5, 7, 8, 10],
+  dorian:   [0, 2, 3, 5, 7, 9, 10],
+  phrygian: [0, 1, 3, 5, 7, 8, 10],
+  harmonic: [0, 2, 3, 5, 7, 8, 11],
+};
+// root：旋律的主音（MIDI 編號，57 = A3）；prog：每小節和弦的音階級數（0 = 主和弦）
+// arp / lead：琶音和旋律的音色；seed：產生旋律用，同一首每次都一樣
+const SONGS = {
+  title: { bpm: 72,  root: 57, scale: 'minor',    prog: [0, 5, 3, 6], arp: 'sine',     lead: 'triangle', seed: 11 },
+  w0:    { bpm: 100, root: 57, scale: 'minor',    prog: [0, 5, 3, 4], arp: 'triangle', lead: 'square',   seed: 21 },   // 荒原：低沉神秘
+  w1:    { bpm: 90,  root: 50, scale: 'phrygian', prog: [0, 1, 0, 6], arp: 'sine',     lead: 'triangle', seed: 33 },   // 墓園：陰森
+  w2:    { bpm: 96,  root: 52, scale: 'dorian',   prog: [0, 3, 6, 4], arp: 'sine',     lead: 'sine',     seed: 47 },   // 森林：空靈
+  w3:    { bpm: 104, root: 59, scale: 'minor',    prog: [0, 6, 5, 4], arp: 'triangle', lead: 'triangle', seed: 52, sparkle: true },   // 冰原：清冷，琶音高八度
+  w4:    { bpm: 118, root: 48, scale: 'harmonic', prog: [0, 5, 1, 4], arp: 'square',   lead: 'sawtooth', seed: 68 },   // 血月：急促
+};
+// 魔王曲：同一個世界的主音，換成和聲小調、加快 15%、和弦更壓迫
+const bossSong = w => ({ ...SONGS['w' + w], bpm: Math.round(SONGS['w' + w].bpm * 1.15), scale: 'harmonic', prog: [0, 0, 5, 4], seed: SONGS['w' + w].seed + 100, boss: true });
+
+const music = (() => {
+  let ac = null, out = null, noise = null, timer = null;
+  let song = null, melody = null, level = 0, wantKey = '', pending = null;
+  let step = 0, nextT = 0, spb = 0.15;
+
+  // 固定種子的亂數：同一首歌的旋律每次產生都一樣
+  const seeded = seed => () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  const midiHz = m => 440 * 2 ** ((m - 69) / 12);
+  // 音階第 deg 級的 MIDI 音高（deg 可以超過 7，會往上一個八度）
+  const degNote = (S, deg) => S.root + SCALES[S.scale][((deg % 7) + 7) % 7] + 12 * Math.floor(deg / 7);
+
+  // 四小節的旋律：強拍容易有音，音高多半落在和弦音上
+  function makeMelody(S) {
+    const rnd = seeded(S.seed), notes = [];
+    for (let i = 0; i < 64; i++) {
+      const s = i % 16, p = s % 8 === 0 ? 0.7 : s % 4 === 0 ? 0.4 : s % 2 === 0 ? 0.18 : 0.05;
+      if (rnd() >= p) continue;
+      const chord = S.prog[Math.floor(i / 16) % S.prog.length];
+      const pick = rnd();
+      const off = pick < 0.6 ? [0, 2, 4][Math.floor(rnd() * 3)] : pick < 0.85 ? [1, 3, 5][Math.floor(rnd() * 3)] : 7;
+      notes[i] = degNote(S, chord + off) + 12;
+    }
+    return notes;
+  }
+
+  // 一個音：振盪器 →（低通濾波）→ 音量包絡 → 音樂總線
+  function note(t, midi, dur, type, vol, { attack = 0.01, cutoff = 0 } = {}) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.value = midiHz(midi);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    let node = o;
+    if (cutoff) { const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff; node.connect(f); node = f; }
+    node.connect(g).connect(out);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function kick(t, vol = 0.32) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(130, t);
+    o.frequency.exponentialRampToValueAtTime(40, t + 0.14);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    o.connect(g).connect(out);
+    o.start(t); o.stop(t + 0.25);
+  }
+  function hiss(t, dur, vol, freq, type) {
+    const src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    src.buffer = noise;
+    f.type = type; f.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f).connect(g).connect(out);
+    src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.02);
+  }
+  const hat = (t, vol = 0.05) => hiss(t, 0.04, vol, 7000, 'highpass');
+  const snare = t => { hiss(t, 0.14, 0.13, 1800, 'bandpass'); note(t, 50, 0.08, 'triangle', 0.06); };
+
+  function playStep(t) {
+    const S = song, s = step % 16, bar = Math.floor(step / 16);
+    const chord = S.prog[bar % S.prog.length];
+    const triad = [0, 2, 4].map(o => degNote(S, chord + o));
+    const L = level;
+
+    // 和弦墊底：每小節開頭彈一次，慢慢淡出
+    if (s === 0) for (const m of triad) note(t, m - 12, spb * 16 * 1.05, 'triangle', L ? 0.035 : 0.045, { attack: 0.4, cutoff: 900 });
+    // 低音：一般關兩個音、影潮與魔王戰變成八分音符推進
+    const bassHit = L >= 3 ? s % 2 === 0 : L === 2 ? [0, 3, 6, 8, 11, 14].includes(s) : L === 1 ? [0, 6, 8, 14].includes(s) : s === 0;
+    // 低音太低手機喇叭發不出來，最低放在 E2（82Hz）
+    let bass = triad[0] - 24;
+    while (bass < 40) bass += 12;
+    if (bassHit) note(t, bass, L ? spb * 1.8 : spb * 14, 'sawtooth', L ? 0.09 : 0.05, { cutoff: L >= 2 ? 700 : 450 });
+    // 琶音：和弦音輪流彈，越緊張越密；冰原高一個八度
+    const arpEvery = L >= 2 ? 1 : L === 1 ? 2 : 4;
+    if (s % arpEvery === 0) {
+      const m = triad[(step / arpEvery) % 3 | 0] + (S.sparkle ? 24 : 12);
+      note(t, m, spb * 1.6, S.arp, L >= 2 ? 0.03 : 0.035);
+    }
+    // 旋律：影潮、魔王戰一直有；一般關每隔四小節出現一次；標題畫面也有
+    const leadOn = L !== 1 || Math.floor(bar / 4) % 2 === 1;
+    const m = melody[step % 64];
+    if (leadOn && m) {
+      let len = 1;
+      while (len < 4 && !melody[(step + len) % 64]) len++;
+      note(t, m, spb * len * 0.95, S.lead, S.lead === 'sine' || S.lead === 'triangle' ? 0.06 : 0.025, { cutoff: 2400 });
+    }
+    // 鼓
+    if (L >= 1) {
+      const kicks = L >= 3 ? [0, 3, 8, 11] : L === 2 ? [0, 4, 8, 12] : [0, 8];
+      if (kicks.includes(s)) kick(t, L >= 2 ? 0.34 : 0.26);
+      if (L >= 2 && (s === 4 || s === 12)) snare(t);
+      if (L >= 3 ? true : L === 2 ? s % 2 === 0 : s % 4 === 2) hat(t, s % 4 === 2 ? 0.06 : 0.035);
+    }
+  }
+
+  // 換歌或換強度：換歌等到下一拍、從頭開始；只換強度就下一拍直接切
+  function apply() {
+    if (!pending) return;
+    if (pending.song !== song) {
+      song = pending.song; melody = makeMelody(song); step = 0;
+      spb = 60 / song.bpm / 4;
+    }
+    level = pending.level;
+    pending = null;
+  }
+
+  function tick() {
+    if (!ac || ac.state !== 'running') return;
+    if (nextT < ac.currentTime) nextT = ac.currentTime + 0.05;   // 分頁卡住過，重新對齊
+    while (nextT < ac.currentTime + 0.12) {
+      if (pending && step % 4 === 0) apply();
+      if (song) playStep(nextT);
+      nextT += spb;
+      step++;
+    }
+  }
+
+  return {
+    start(ctx, bus) {
+      ac = ctx; out = ac.createGain(); out.gain.value = 1; out.connect(bus);
+      // 一秒的白噪音，鼓的沙沙聲共用
+      noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+      const d = noise.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      nextT = ac.currentTime + 0.1;
+      timer = setInterval(tick, 25);
+    },
+    // 每格呼叫：告訴音樂現在該放什麼，沒變就什麼都不做
+    want(key, S, lv) {
+      if (key === wantKey) return;
+      wantKey = key;
+      pending = { song: S, level: lv };
+      if (!song) apply();
+    },
+    // 暫停時音樂變小聲
+    duck(on) { if (out) out.gain.setTargetAtTime(on ? 0.35 : 1, ac.currentTime, 0.2); },
+  };
+})();
+
+// 依遊戲狀態決定要放哪首、多強
+function updateMusic() {
+  const m = game.mode;
+  if (!game.player || m === 'title' || m === 'over') return music.want('title', SONGS.title, 0);
+  const w = game.world;
+  if (game.phase === 'boss') return music.want('boss' + w, bossSong(w), 3);
+  const lv = game.surge && game.phase === 'waves' ? 2 : 1;
+  music.want(`w${w}:${lv}`, SONGS['w' + w], lv);
+}
 
 // ============================================================
 //  空間格子：把敵人依位置分格，碰撞時只檢查附近的格子
@@ -826,6 +1035,7 @@ function newGame(world = game.world || 0) {
     coins: 0, coinsBanked: 0, surviveBonus: 0,
   });
   sfx.init();
+  music.duck(false);   // 從暫停畫面按「重新開始」時，音量要恢復
   game.player = {
     x: 0, y: 0, r: 14, hp: 100, maxHp: 100, iframe: 0,
     speed: 150, moveMul: 1, dmgMul: 1, cdMul: 1, pickup: 70, regen: 0, areaMul: 1, xpMul: 1,
@@ -883,6 +1093,7 @@ function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05);   // 切回分頁時不要一次跳太多
   last = now;
   if (game.mode === 'play') update(dt);
+  updateMusic();
   render();
   requestAnimationFrame(frame);
 }
@@ -2640,10 +2851,12 @@ function togglePause() {
     $('pauseBuild').innerHTML = buildHtml();
     $('recipes').innerHTML = recipesHtml();
     showOnly('pauseScreen');
+    music.duck(true);
   } else if (game.mode === 'paused') {
     game.mode = 'play';
     last = performance.now();
     showOnly(null);
+    music.duck(false);
   }
 }
 
@@ -2850,6 +3063,10 @@ const renderOverCoins = () => {
   $('overCoins').innerHTML = `本局獲得 ◆ <b>${game.coinsBanked}</b><small>（含存活獎勵 ${game.surviveBonus}）　共 ${meta.coins}</small>`;
 };
 renderTitle();
+// 標題畫面的音樂：瀏覽器規定要先點一下或按個鍵才能出聲
+addEventListener('pointerdown', () => sfx.init(), { once: true });
+addEventListener('keydown', () => sfx.init(), { once: true });
+
 // 關掉分頁或切到背景時，先把這局的金幣存起來
 addEventListener('pagehide', bankCoins);
 
@@ -2858,6 +3075,18 @@ $('nextWorldBtn').onclick = () => newGame(game.world + 1);
 $('titleBtn').onclick = () => { renderTitle(); showOnly('titleScreen'); };
 const syncMute = () => { $('muteBtn').textContent = sfx.muted ? '🔇' : '🔊'; };
 $('muteBtn').onclick = () => { sfx.toggle(); syncMute(); };
+// 兩組滑桿（設定、暫停）同步顯示
+function syncVols() {
+  for (const kind of ['music', 'sfx']) {
+    const v = Math.round(vols[kind] * 100);
+    document.querySelectorAll('.vol-' + kind).forEach(el => { el.value = v; });
+    document.querySelectorAll(`.vol-${kind}-n`).forEach(el => { el.textContent = v; });
+  }
+}
+for (const kind of ['music', 'sfx']) document.querySelectorAll('.vol-' + kind).forEach(el => {
+  el.oninput = () => { sfx.init(); sfx.setVol(kind, el.value / 100); syncVols(); };
+});
+syncVols();
 syncMute();
 $('againBtn').onclick = () => newGame(game.world);
 $('quitBtn').onclick = () => { game.mode = 'over'; bankCoins(); newGame(game.world); };
@@ -2867,6 +3096,9 @@ $('pauseBtn').onclick = togglePause;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && game.mode === 'play') togglePause();
   if (document.hidden) bankCoins();
+  // 切到背景時整個聲音停掉，回來再繼續
+  const ac = sfx.ac;
+  if (ac) document.hidden ? ac.suspend() : ac.resume();
 });
 </script>
 </body>

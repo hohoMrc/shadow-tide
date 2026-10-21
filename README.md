@@ -24,6 +24,7 @@
 | `EVOLUTIONS` / `openChest` | 武器進化配方與寶箱（6 把武器、6 種進化） |
 | `MAX_WEAPONS` / `MAX_PASSIVES` | 欄位上限：武器 4 把、被動 5 種 |
 | `CHARACTERS` / `renderChars` | 六個角色：起始武器、天賦、外型（`look`、`drawHeadgear`）、解鎖條件 |
+| `SONGS` / `music` / `updateMusic` | 背景音樂：即時合成，每個世界一首、魔王戰另一首，依狀態切換強度 |
 | `exportSave` / `importSave` | 存檔匯出／匯入（`ST1.` 開頭的存檔碼） |
 | `META_UPS` / `metaCost` | 局外成長：金幣商店的永久強化與價格 |
 | `COIN_CHANCE` / `BOSS_COINS` / `SURVIVE_SECS` | 金幣來源：小怪掉落、魔王、存活獎勵 |
