@@ -66,15 +66,18 @@
   .bossbar { display: grid; gap: 4px; justify-items: center; font-weight: 900; font-size: 13px; letter-spacing: .2em; color: var(--hp); }
   .bossbar div { width: min(100%, 520px); height: 10px; border-radius: 5px; background: rgba(255,255,255,.08); overflow: hidden; }
   .bossbar i { display: block; height: 100%; width: 100%; background: var(--hp); }
-  .stagemap { display: flex; justify-content: center; gap: 6px; margin: 0 0 20px; flex-wrap: wrap; }
-  .stagemap span {
-    font-size: .8rem; padding: 6px 10px; border-radius: 10px;
-    background: var(--panel); border: 1px solid var(--line); color: var(--dim);
+  /* 標題畫面的世界選單 */
+  .worlds { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 0 0 18px; }
+  .world {
+    font: inherit; color: var(--ink); cursor: pointer;
+    display: grid; justify-items: center; gap: 2px; padding: 10px 2px;
+    border-radius: 12px; background: var(--panel); border: 1px solid var(--line);
   }
-  .stagemap span.on { color: var(--ink); border-color: rgba(255,200,87,.45); }
-  .stagemap span b { font-family: var(--font-gauge); color: var(--lamp); margin-right: 4px; }
-  .stagemap .locked { opacity: .45; }
-  .stagemap-note { font-size: .8rem; color: var(--dim); margin: -12px 0 18px; }
+  .world b { font-family: var(--font-gauge); color: var(--lamp); font-size: 1.1rem; }
+  .world span { font-size: .85rem; font-weight: 700; }
+  .world small { font-size: .62rem; color: var(--dim); line-height: 1.3; }
+  .world.picked { border-color: var(--lamp); background: rgba(255,200,87,.1); }
+  .world.locked { opacity: .4; cursor: default; }
   .pause-btn {
     pointer-events: auto;
     width: 36px; height: 36px; border-radius: 10px;
@@ -211,9 +214,8 @@
 <div class="overlay" id="titleScreen">
   <div class="card">
     <h1>影潮</h1>
-    <p>提著燈，穿越五個夜晚。<br>每關撐過 3 分鐘，打倒魔王，天就會亮。</p>
-    <div class="stagemap" id="stageMap"></div>
-    <p class="stagemap-note" id="stageNote" hidden></p>
+    <p>提著燈，穿越五個世界的夜晚。<br>每個世界 5 關，第 3 關打中王、第 5 關打魔王。</p>
+    <div class="worlds" id="worldList"></div>
     <p class="coin-total">◆ <b id="titleCoins">0</b><small>金幣</small></p>
     <div class="btns">
       <button class="btn" id="startBtn">點燈出發</button>
@@ -281,8 +283,10 @@
     <p class="coin-total" id="overCoins"></p>
     <div class="build" id="overBuild"></div>
     <div class="btns">
+      <button class="btn" id="nextWorldBtn" hidden></button>
       <button class="btn" id="againBtn">再來一局</button>
       <button class="btn ghost" id="overShopBtn">強化</button>
+      <button class="btn ghost" id="titleBtn">選世界</button>
     </div>
   </div>
 </div>
@@ -580,54 +584,93 @@ const MAX_PASSIVES = 5;
 //  敵人種類（ai 沒寫的就是直直追玩家）
 // ============================================================
 const ENEMY_TYPES = {
-  wisp:     { r: 11, hp: 7,   speed: 72,  dmg: 8,  xp: 1,  color: '#5b4f8c' },
-  runner:   { r: 9,  hp: 6,   speed: 125, dmg: 6,  xp: 1,  color: '#3f7a8c' },
-  brute:    { r: 19, hp: 55,  speed: 46,  dmg: 15, xp: 3,  color: '#7a3f63' },
-  splitter: { r: 15, hp: 22,  speed: 58,  dmg: 10, xp: 2,  color: '#4f7a5b', ai: 'split' },
-  mite:     { r: 7,  hp: 4,   speed: 115, dmg: 5,  xp: 1,  color: '#6fa37f' },
-  spitter:  { r: 12, hp: 14,  speed: 64,  dmg: 8,  xp: 2,  color: '#3f8c7a', ai: 'spit' },
+  wisp:     { name: '小影', r: 11, hp: 7,   speed: 72,  dmg: 8,  xp: 1,  color: '#5b4f8c' },
+  runner:   { name: '疾影', r: 9,  hp: 6,   speed: 125, dmg: 6,  xp: 1,  color: '#3f7a8c' },
+  brute:    { name: '壯影', r: 19, hp: 55,  speed: 46,  dmg: 15, xp: 3,  color: '#7a3f63' },
+  splitter: { name: '屍影', r: 15, hp: 22,  speed: 58,  dmg: 10, xp: 2,  color: '#4f7a5b', ai: 'split' },
+  mite:     { name: '小屍蟲', r: 7,  hp: 4,   speed: 115, dmg: 5,  xp: 1,  color: '#6fa37f' },
+  spitter:  { name: '吐影', r: 12, hp: 14,  speed: 64,  dmg: 8,  xp: 2,  color: '#3f8c7a', ai: 'spit' },
   // 冰影：一次射 3 發扇形冰晶，打中會減速
-  frost:    { r: 13, hp: 20,  speed: 60,  dmg: 8,  xp: 2,  color: '#7fb4e0', ai: 'spit',
+  frost:    { name: '冰影', r: 13, hp: 20,  speed: 60,  dmg: 8,  xp: 2,  color: '#7fb4e0', ai: 'spit',
               shot: { count: 3, spread: 0.28, speed: 200, cd: 2.2, slow: true } },
-  charger:  { r: 14, hp: 24,  speed: 50,  dmg: 14, xp: 2,  color: '#4f86b0', ai: 'charge' },
-  elite:    { r: 30, hp: 450, speed: 52,  dmg: 25, xp: 25, color: '#a8324f', elite: true },
-  boss:     { r: 46, hp: 1,   speed: 70,  dmg: 30, xp: 0,  color: '#2a1d3d', boss: true, ai: 'boss' },
+  charger:  { name: '衝影', r: 14, hp: 24,  speed: 50,  dmg: 14, xp: 2,  color: '#4f86b0', ai: 'charge' },
+  elite:    { name: '菁英', r: 30, hp: 450, speed: 52,  dmg: 25, xp: 25, color: '#a8324f', elite: true },
+  boss:     { name: '魔王', r: 46, hp: 1,   speed: 70,  dmg: 30, xp: 0,  color: '#2a1d3d', boss: true, ai: 'boss' },
 };
 
 // ============================================================
-//  關卡：場景、怪的組成、魔王都在這裡
-//  mix 每一項是 [怪種, 出現權重, 本關第幾秒後開始出現]
+//  世界：一局 = 一個世界的 5 關（X-1 ～ X-5），流派在世界內一路延續
+//  第 3 關結束打中王、第 5 關結束打魔王；其他關撐完時間就過關
+//  mix 每一項是 [怪種, 出現權重, 從第幾關開始（0 = X-1）]
 //  魔王 attacks 每一項是 [招式, 冷卻秒數]
+//  tier：這個世界的難度倍率（血量、傷害、生怪速度）與金幣倍率
 // ============================================================
-const STAGE_TIME = 180;   // 每關撐 3 分鐘，魔王出現
-const STAGES = [
+const STAGE_TIME = 150;   // 每關 2 分半
+const SUB_COUNT = 5, MID_SUB = 2, LAST_SUB = SUB_COUNT - 1;
+const WORLDS = [
   { name: '荒原', intro: '疾影出沒：速度很快，別被追上',
     bg: '#0c0e19', decor: 'grass', ink: '#1d2236', ink2: '#161a2b',
-    mix: [['wisp', 1, 0], ['runner', 0.4, 20], ['brute', 0.25, 45]],
-    boss: { name: '影王', hp: 1500, color: '#2a1d3d', attacks: [['dash', 3]] } },
+    tier: { hp: 1, dmg: 1, spawn: 0, coin: 1 },
+    mix: [['wisp', 1, 0], ['runner', 0.35, 0], ['brute', 0.25, 1], ['runner', 0.25, 3], ['brute', 0.15, 4]],
+    mid:  { name: '狼影', hp: 7000, color: '#3a2d5c', r: 34, speed: 85, attacks: [['dash', 2.5]] },
+    boss: { name: '影王', hp: 26000, color: '#2a1d3d', attacks: [['dash', 3], ['summon', 7]] } },
   { name: '墓園', intro: '屍影出沒：打倒後會分裂成兩隻',
     bg: '#0b1311', decor: 'tomb', ink: '#26352f', ink2: '#17221e', colors: { wisp: '#4f6b5f' },
-    mix: [['wisp', 1, 0], ['splitter', 0.5, 0], ['brute', 0.3, 40]],
-    boss: { name: '墓守', hp: 16000, color: '#1d2e27', attacks: [['summon', 5], ['dash', 6]] } },
+    tier: { hp: 1.5, dmg: 1.2, spawn: 4, coin: 1.25 },
+    mix: [['wisp', 1, 0], ['splitter', 0.5, 0], ['runner', 0.3, 1], ['brute', 0.3, 2], ['splitter', 0.3, 3]],
+    mid:  { name: '掘墓人', hp: 7000, color: '#2a3d33', r: 36, speed: 60, attacks: [['summon', 4], ['slam', 6]] },
+    boss: { name: '墓守', hp: 26000, color: '#1d2e27', attacks: [['summon', 5], ['dash', 6], ['slam', 7]] } },
   { name: '迷霧森林', intro: '吐影出沒：會保持距離朝你射擊',
     bg: '#09110e', decor: 'tree', ink: '#16261f', ink2: '#1d3329', colors: { wisp: '#3f6b5a' },
-    mix: [['wisp', 1, 0], ['spitter', 0.35, 0], ['runner', 0.3, 30], ['brute', 0.3, 60]],
-    boss: { name: '樹魔', hp: 32000, color: '#1a2b1f', speed: 50, attacks: [['spray', 2.5], ['summon', 7]] } },
+    tier: { hp: 2.1, dmg: 1.4, spawn: 8, coin: 1.5 },
+    mix: [['wisp', 1, 0], ['spitter', 0.35, 0], ['runner', 0.3, 1], ['brute', 0.3, 2], ['splitter', 0.2, 3], ['spitter', 0.2, 3]],
+    mid:  { name: '毒蕈', hp: 7000, color: '#2b3d1f', r: 38, speed: 40, attacks: [['spray', 3]] },
+    boss: { name: '樹魔', hp: 26000, color: '#1a2b1f', speed: 50, attacks: [['spray', 2.5], ['summon', 7]] } },
   { name: '冰原', intro: '冰影的冰晶會讓你變慢，衝影會蓄力衝刺',
     bg: '#0b1220', decor: 'ice', ink: '#22344d', ink2: '#18263b', colors: { wisp: '#4f6a94', brute: '#5a5f94' },
-    mix: [['wisp', 1, 0], ['frost', 0.35, 0], ['charger', 0.4, 0], ['brute', 0.35, 30]],
-    boss: { name: '霜巨人', hp: 55000, color: '#25385a', speed: 45, r: 58, iceShots: true, attacks: [['slam', 2.2], ['spray', 4]] } },
+    tier: { hp: 2.8, dmg: 1.6, spawn: 12, coin: 1.75 },
+    mix: [['wisp', 1, 0], ['runner', 0.3, 0], ['frost', 0.15, 0], ['charger', 0.35, 1], ['frost', 0.2, 1], ['brute', 0.35, 2], ['spitter', 0.2, 3]],
+    mid:  { name: '冰狼', hp: 7000, color: '#2d4466', r: 36, speed: 80, iceShots: true, attacks: [['dash', 3], ['spray', 5]] },
+    boss: { name: '霜巨人', hp: 26000, color: '#25385a', speed: 45, r: 58, iceShots: true, attacks: [['slam', 2.2], ['spray', 4]] } },
   { name: '血月', intro: '所有影子都來了',
     bg: '#150a0e', decor: 'blood', ink: '#33161d', ink2: '#261117', colors: { wisp: '#7a3f4f' },
-    mix: [['wisp', 1, 0], ['runner', 0.3, 0], ['splitter', 0.3, 0], ['spitter', 0.25, 0], ['frost', 0.2, 0], ['charger', 0.25, 0], ['brute', 0.35, 0]],
-    boss: { name: '夜之母', hp: 75000, color: '#3a0f1f', r: 54, attacks: [['dash', 3.5], ['spray', 3], ['slam', 4], ['summon', 8]] } },
+    tier: { hp: 3.6, dmg: 1.8, spawn: 16, coin: 2 },
+    mix: [['wisp', 1, 0], ['runner', 0.3, 0], ['splitter', 0.3, 0], ['spitter', 0.25, 1], ['frost', 0.2, 1], ['charger', 0.25, 2], ['brute', 0.35, 2], ['brute', 0.2, 4]],
+    mid:  { name: '血蝠王', hp: 7000, color: '#4a1426', r: 36, speed: 90, attacks: [['dash', 2.5], ['spray', 3.5]] },
+    boss: { name: '夜之母', hp: 26000, color: '#3a0f1f', r: 54, attacks: [['dash', 3.5], ['spray', 3], ['slam', 4], ['summon', 8]] } },
 ];
+const stageName = (w, sub) => `${w + 1}-${sub + 1}`;
 
-// 存檔：最遠到過第幾關、全破幾次
-const SAVE_KEY = 'shadowtide-progress';
+// 世界的難度倍率不是一開場就全開：每局都從 1 級重新開始，所以從 3 成開始，約 3.5 分鐘爬到全額
+const tierRamp = () => Math.min(1, 0.3 + game.t / 300);
+const tierMul = key => 1 + (WORLDS[game.world].tier[key] - 1) * tierRamp();
+
+// 每關開場的介紹文字：第一關講世界特色，之後講新出現的敵人和魔王
+function stageIntro(w, sub) {
+  const W = WORLDS[w];
+  if (sub === 0) return W.intro;
+  const lines = [];
+  const fresh = [...new Set(W.mix.filter(([, , from]) => from === sub).map(([t]) => t))]
+    .filter(t => !W.mix.some(([o, , from]) => o === t && from < sub));
+  if (fresh.length) lines.push('新敵人：' + fresh.map(t => ENEMY_TYPES[t].name).join('、'));
+  if (sub === MID_SUB) lines.push(`撐過這關，中王「${W.mid.name}」會出現`);
+  else if (sub === LAST_SUB) lines.push(`最後一關：撐過去，魔王「${W.boss.name}」在等你`);
+  else if (!fresh.length) lines.push('影子越來越多了');
+  return lines.join('　');
+}
+
+// 存檔：解鎖到第幾個世界、每個世界最遠到第幾關、破關幾次
+const SAVE_KEY = 'shadowtide-worlds';
 function loadProgress() {
-  try { return { reached: 1, cleared: 0, ...JSON.parse(localStorage.getItem(SAVE_KEY) || '{}') }; }
-  catch (_) { return { reached: 1, cleared: 0 }; }
+  const blank = { unlocked: 1, best: WORLDS.map(() => 0), clears: WORLDS.map(() => 0), pick: 0 };
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw) return { ...blank, ...JSON.parse(raw) };
+    // 舊版（五關一局）的存檔：破過關就先開放第 2 個世界
+    const old = JSON.parse(localStorage.getItem('shadowtide-progress') || '{}');
+    if (old.cleared) blank.unlocked = 2;
+  } catch (_) {}
+  return blank;
 }
 function saveProgress(p) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(p)); } catch (_) {} }
 
@@ -677,15 +720,18 @@ function bankCoins() {
 //  遊戲狀態
 // ============================================================
 const game = { mode: 'title' };
-// 網址加 ?debug：滿級武器＋配方被動、每關 20 秒、魔王血量 3 成；再加 &stage=3 可從第 3 關開始
+// 網址加 ?debug：滿級武器＋配方被動、每關 20 秒、魔王血量 3 成；再加 &world=2&stage=3 可從 2-3 開始
 let debug = false, stageTime = STAGE_TIME;
 
-function newGame() {
+function newGame(world = game.world || 0) {
   const params = new URLSearchParams(location.search);
   debug = params.has('debug');
   stageTime = debug ? 20 : STAGE_TIME;
+  if (debug && params.has('world')) world = clamp(Number(params.get('world')) - 1 || 0, 0, WORLDS.length - 1);
   Object.assign(game, {
-    mode: 'play', t: 0, kills: 0, shake: 0,
+    mode: 'play', world, t: 0, kills: 0, shake: 0,
+    enemies: [], bullets: [], gems: [], shots: [], zones: [], blades: [], fires: [], arcs: [],
+    items: [], freezeT: 0, screenFlash: 0,
     pendingLevels: 0, pendingChests: 0, starterChest: false,
     rings: [], particles: [], texts: [], pops: [],
     combo: 0, comboT: 0, bestCombo: 0, gemCombo: 0, gemT: 0,
@@ -701,33 +747,33 @@ function newGame() {
   };
   // 套用商店買的永久強化
   for (const [id, U] of Object.entries(META_UPS)) if (meta.ups[id]) U.apply(game.player, meta.ups[id]);
+  game.player.coinMul *= WORLDS[world].tier.coin;   // 越難的世界金幣越多
   game.player.hp = game.player.maxHp;
   addWeapon('bolt');
   if (debug) {
     for (const id of ['bolt', 'orbit', 'pulse']) while ((game.weapons.find(w => w.id === id)?.lv || 0) < WEAPONS[id].max) addWeapon(id);
     for (const id of ['focus', 'vigor', 'might']) { game.passives[id] = 1; PASSIVES[id].apply(game.player); }
   }
-  startStage(debug ? clamp((Number(params.get('stage')) || 1) - 1, 0, STAGES.length - 1) : 0);
+  startStage(debug ? clamp((Number(params.get('stage')) || 1) - 1, 0, LAST_SUB) : 0);
   // 開局送一個寶箱（必定是新武器），放在角色上方，走幾步就撿得到
   game.gems.push({ x: game.player.x, y: game.player.y - 150, v: 0, kind: 'chest', starter: true, magnet: false });
   showOnly(null);
   $('hud').hidden = false;
 }
 
+// 開始世界裡的第 i 關（0 = X-1）。場上的東西不清空，關與關之間是連續的
 function startStage(i) {
-  const S = STAGES[i];
+  const w = game.world;
   Object.assign(game, {
-    stage: i, st: 0, phase: 'waves', clearT: 0, boss: null,
-    spawnAcc: 0, nextElite: debug ? 5 : 60, nextRing: 90,
-    enemies: [], bullets: [], gems: [], shots: [], zones: [], blades: [], fires: [], arcs: [],
-    items: [], freezeT: 0, screenFlash: 0,
-    banner: { title: `第 ${i + 1} 關　${S.name}`, sub: S.intro, t: 0 },
+    sub: i, st: 0, phase: 'waves', clearT: 0, boss: null, surge: false,
+    spawnAcc: 0, nextElite: debug ? 5 : 50, nextRing: 80,
+    banner: { title: `${stageName(w, i)}　${WORLDS[w].name}`, sub: stageIntro(w, i), t: 0 },
   });
   // 每關第一個道具：先等該關間隔的 6 成（debug 模式 3 秒就出）
   game.nextItem = debug ? 3 : nextItemDelay() * 0.6;
   setBossBar(null);
   const prog = loadProgress();
-  if (i + 1 > prog.reached) { prog.reached = i + 1; saveProgress(prog); }
+  if (i + 1 > prog.best[w]) { prog.best[w] = i + 1; saveProgress(prog); }
 }
 
 // 前期升級快（很快就有東西選），後期越來越慢，讓全部拿滿大約落在第 5 關
@@ -792,13 +838,26 @@ function update(dt) {
   // 寶箱優先：先進化，接下來的升級選項才會反映新武器
   if (game.pendingChests > 0) openChest();
   else if (game.pendingLevels > 0) openLevelUp();
-  else if (game.phase === 'clear' && game.clearT > 2.5) openStageClear();
+  else if (game.phase === 'clear' && game.clearT > 2.5) stageDone();
   updateHud();
 }
 
-// 關卡流程：撐滿時間 → 魔王 → 打倒後把地上的光晶全吸過來 → 過關畫面
+// 關卡流程：撐滿時間 →（第 3、5 關打王）→ 清場、把地上的光晶全吸過來 → 下一關
+const hasBoss = sub => sub === MID_SUB || sub === LAST_SUB;
 function updateStage(dt) {
-  if (game.phase === 'waves' && game.st >= stageTime) spawnBoss();
+  if (game.phase === 'waves') {
+    // 沒有魔王的關卡：最後 20 秒影潮來襲，怪變多
+    if (!hasBoss(game.sub) && !game.surge && game.st >= stageTime - 20) {
+      game.surge = true;
+      game.banner = { title: '影潮來襲！', sub: '撐過最後 20 秒', t: 0, danger: true };
+    }
+    if (game.st >= stageTime) {
+      const W = WORLDS[game.world];
+      if (game.sub === MID_SUB) spawnBoss(W.mid, false);
+      else if (game.sub === LAST_SUB) spawnBoss(W.boss, true);
+      else { clearField(); game.banner = { title: `${stageName(game.world, game.sub)}　完成！`, sub: '', t: 0 }; }
+    }
+  }
   if (game.phase === 'clear') {
     game.clearT += dt;
     for (const g of game.gems) g.magnet = true;
@@ -815,20 +874,23 @@ function spawnEnemies(dt) {
   const st = game.st;
   // 成群出現：同一個方向一次湧來一小團，掃過去才有「割草」的感覺
   // 魔王戰時小怪變少，讓玩家專心打王，但還是有經驗可以撿
-  const rate = Math.min(6 + st / 5 + game.stage * 5, 70) * (game.phase === 'boss' ? 0.2 : 1);
+  const rate = Math.min(6 + st / 5 + game.sub * 4 + WORLDS[game.world].tier.spawn * tierRamp(), 70)
+    * (game.phase === 'boss' ? 0.2 : game.surge ? 1.6 : 1);
   game.spawnAcc += dt * rate;
-  const group = 4 + Math.floor(Math.random() * (4 + st / 40));
+  let group = 4 + Math.floor(Math.random() * (4 + st / 40));
   if (game.spawnAcc >= group) {
     game.spawnAcc -= group;
     const a = Math.random() * Math.PI * 2, d = viewRadius() + 40;
     const cx = game.player.x + Math.cos(a) * d, cy = game.player.y + Math.sin(a) * d;
     const type = pickType();
+    // 會射擊的怪一次只來一半，不然一整群同時開火根本躲不掉
+    if (ENEMY_TYPES[type].ai === 'spit') group = Math.ceil(group / 2);
     for (let i = 0; i < group; i++) spawnEnemy(type, cx + rand(-40, 40), cy + rand(-40, 40));
   }
   if (game.phase !== 'waves') return;
-  // 每關第 60、120 秒各一隻菁英
+  // 每關第 50、110 秒各一隻菁英
   if (st >= game.nextElite) { game.nextElite += 60; spawnEnemy('elite'); }
-  // 第 90 秒「包圍」：一圈影子同時出現
+  // 第 80 秒「包圍」：一圈影子同時出現
   if (st >= game.nextRing) {
     game.nextRing = Infinity;
     const n = 36, R = viewRadius() * 0.85;
@@ -840,7 +902,7 @@ function spawnEnemies(dt) {
 }
 
 function pickType() {
-  const table = STAGES[game.stage].mix.filter(([, , from]) => game.st >= from);
+  const table = WORLDS[game.world].mix.filter(([, , from]) => game.sub >= from);
   let roll = Math.random() * table.reduce((s, [, w]) => s + w, 0);
   for (const [id, w] of table) if ((roll -= w) < 0) return id;
   return 'wisp';
@@ -854,21 +916,22 @@ function spawnEnemy(type, x, y, force) {
     x = game.player.x + Math.cos(a) * d;
     y = game.player.y + Math.sin(a) * d;
   }
-  // 血量依「整趟累積時間」成長，因為流派會一路帶到後面的關卡
-  const hp = T.hp * (1 + game.t / 120);
-  const color = STAGES[game.stage].colors?.[type] || T.color;
+  // 血量依「這局累積時間」成長（流派會一路帶到後面的關卡），再乘上世界的難度
+  const hp = T.hp * (1 + game.t / 120) * tierMul('hp');
+  const color = WORLDS[game.world].colors?.[type] || T.color;
   const e = { ...T, type, x, y, hp, maxHp: hp, color, vx: 0, vy: 0, flash: 0, orbitCd: 0, bladeCd: 0, stun: 0, dead: false,
     seed: Math.random() * 10 };   // seed：讓每隻怪的動畫相位不同，不會整群同步擺動
   game.enemies.push(e);
   return e;
 }
 
-function spawnBoss() {
-  const P = game.player, B = STAGES[game.stage].boss;
+// main：第 5 關的大魔王；不是的話就是第 3 關的中王
+function spawnBoss(B, main) {
+  const P = game.player;
   const a = Math.random() * Math.PI * 2, d = viewRadius() * 0.8;
-  const hp = B.hp * (debug ? 0.3 : 1);
+  const hp = B.hp * WORLDS[game.world].tier.hp * (debug ? 0.3 : 1);
   const e = {
-    ...ENEMY_TYPES.boss, type: 'boss', name: B.name, color: B.color,
+    ...ENEMY_TYPES.boss, type: 'boss', name: B.name, color: B.color, main, iceShots: !!B.iceShots,
     r: B.r || 46, speed: B.speed || 70,
     x: P.x + Math.cos(a) * d, y: P.y + Math.sin(a) * d,
     hp, maxHp: hp, vx: 0, vy: 0, flash: 0, orbitCd: 0, bladeCd: 0, stun: 0, dead: false, seed: 0,
@@ -879,7 +942,7 @@ function spawnBoss() {
   game.enemies.push(e);
   game.boss = e;
   game.phase = 'boss';
-  game.banner = { title: `${B.name} 降臨`, sub: '打倒魔王即可過關', t: 0, danger: true };
+  game.banner = { title: `${B.name} 降臨`, sub: main ? '打倒魔王就能破關' : '打倒中王才能繼續前進', t: 0, danger: true };
   game.shake = 12;
   sfx.elite();
   setBossBar(e);
@@ -944,7 +1007,7 @@ function spitterAI(e, dt, d, mv) {
   if (e.fire <= 0 && d < 420) {
     e.fire = S.cd;
     for (let i = 0; i < S.count; i++)
-      enemyShot(e.x, e.y, aim + (i - (S.count - 1) / 2) * S.spread, S.speed, 8 + game.stage * 2, S.slow);
+      enemyShot(e.x, e.y, aim + (i - (S.count - 1) / 2) * S.spread, S.speed, 8, S.slow);
   }
 }
 
@@ -978,7 +1041,7 @@ function bossAI(e, dt, d, mv) {
     if (e.stateT <= 0) e.state = 'chase';
     return;
   }
-  const speedUp = enraged ? (game.stage === STAGES.length - 1 ? 1.6 : 1.3) : 1;
+  const speedUp = enraged ? (e.main && game.world === WORLDS.length - 1 ? 1.6 : 1.3) : 1;
   for (const atk of e.attacks) {
     atk.t -= dt * speedUp;
     if (atk.t > 0) continue;
@@ -1001,13 +1064,12 @@ const BOSS_ATTACKS = {
   spray(e, mv, enraged) {
     const n = enraged ? 18 : 14;
     e.sprayRot += 0.3;
-    const ice = !!STAGES[game.stage].boss.iceShots;
-    for (let i = 0; i < n; i++) enemyShot(e.x, e.y, e.sprayRot + i / n * Math.PI * 2, 165, 10 + game.stage * 2, ice);
+    for (let i = 0; i < n; i++) enemyShot(e.x, e.y, e.sprayRot + i / n * Math.PI * 2, 165, 10, e.iceShots);
   },
   slam() {
     const P = game.player;
     const spots = [[0, 0], [rand(-120, 120), rand(-120, 120)], [rand(-120, 120), rand(-120, 120)]];
-    for (const [ox, oy] of spots) game.zones.push({ x: P.x + ox, y: P.y + oy, r: 75, delay: 0.9, age: 0, dmg: 18 + game.stage * 3 });
+    for (const [ox, oy] of spots) game.zones.push({ x: P.x + ox, y: P.y + oy, r: 75, delay: 0.9, age: 0, dmg: 18 });
   },
 };
 
@@ -1025,13 +1087,13 @@ const ITEMS = {
 const ITEM_LIFE = 30;   // 地上放多久會消失
 // 每關的道具生成間隔（秒）與地上同時存在的上限：越後面越密
 const ITEM_RATE = [
-  { min: 20, max: 35, cap: 3 },   // 第 1 關
+  { min: 20, max: 35, cap: 3 },   // X-1
   { min: 17, max: 29, cap: 3 },
   { min: 14, max: 24, cap: 4 },
   { min: 11, max: 19, cap: 4 },
-  { min: 8,  max: 14, cap: 5 },   // 第 5 關
+  { min: 8,  max: 14, cap: 5 },   // X-5
 ];
-const nextItemDelay = () => { const R = ITEM_RATE[game.stage]; return rand(R.min, R.max); };
+const nextItemDelay = () => { const R = ITEM_RATE[game.sub]; return rand(R.min, R.max); };
 
 function updateItems(dt) {
   const P = game.player;
@@ -1043,7 +1105,7 @@ function updateItems(dt) {
   game.nextItem -= dt;
   if (game.nextItem <= 0 && game.phase !== 'clear') {
     game.nextItem = nextItemDelay();
-    if (game.items.length < ITEM_RATE[game.stage].cap) {
+    if (game.items.length < ITEM_RATE[game.sub].cap) {
       const a = Math.random() * Math.PI * 2, d = rand(200, 420);
       game.items.push({ kind: rollItem(), x: P.x + Math.cos(a) * d, y: P.y + Math.sin(a) * d, life: ITEM_LIFE });
     }
@@ -1123,7 +1185,7 @@ function updateHazards(dt) {
 function damagePlayer(dmg) {
   const P = game.player;
   if (P.iframe > 0 || P.shieldT > 0) return;
-  dmg = Math.max(1, dmg - P.armor);
+  dmg = Math.max(1, Math.round(dmg * tierMul('dmg')) - P.armor);
   P.hp -= dmg;
   P.iframe = 0.5;
   game.shake = 8;
@@ -1152,7 +1214,7 @@ function hurt(e, dmg, kx = 0, ky = 0) {
   game.gems.push({ x: e.x, y: e.y, v: e.xp, kind: 'xp', magnet: false });
   // 小怪偶爾掉 1 枚金幣；菁英一定掉一袋
   if (Math.random() < COIN_CHANCE) dropCoin(e.x + 8, e.y, 1);
-  if (e.elite) dropCoin(e.x, e.y + 14, 8 + game.stage * 4);
+  if (e.elite) dropCoin(e.x, e.y + 14, 8);
   if (e.elite) {
     game.gems.push({ x: e.x + 14, y: e.y, v: 30, kind: 'heal', magnet: false });
     game.gems.push({ x: e.x - 14, y: e.y, v: 0, kind: 'chest', magnet: false });
@@ -1176,37 +1238,52 @@ function revive() {
   game.banner = { title: '餘燼復燃', sub: '燈火再次亮起', t: 0 };
 }
 
-// 魔王倒下：全場小怪一起爆掉、噴出大量光晶和寶箱
-function bossDefeated(e) {
-  game.boss = null;
+// 一關結束：全場小怪一起爆掉變成光晶、子彈和落點清掉，接著進入過關演出
+function clearField() {
   game.phase = 'clear';
   game.clearT = 0;
   game.shots = []; game.zones = [];
   game.shake = 16;
   sfx.elite(); sfx.chest();
-  setBossBar(null);
   for (const o of game.enemies) {
     if (o.dead) continue;
     o.dead = true;
     burst(o.x, o.y, o.color, 3);
     game.gems.push({ x: o.x, y: o.y, v: o.xp, kind: 'xp', magnet: false });
   }
+}
+
+// 魔王倒下：清場、噴出大量光晶、寶箱和金幣袋
+function bossDefeated(e) {
+  game.boss = null;
+  setBossBar(null);
+  clearField();
   for (let i = 0; i < 12; i++) {
     const a = i / 12 * Math.PI * 2;
-    game.gems.push({ x: e.x + Math.cos(a) * 40, y: e.y + Math.sin(a) * 40, v: 10 + game.stage * 5, kind: 'xp', magnet: false });
+    game.gems.push({ x: e.x + Math.cos(a) * 40, y: e.y + Math.sin(a) * 40, v: 10 + game.sub * 5, kind: 'xp', magnet: false });
   }
   game.gems.push({ x: e.x, y: e.y, v: 0, kind: 'chest', magnet: false });
-  // 魔王掉一圈金幣袋
   for (let i = 0; i < 6; i++) {
     const a = (i + 0.5) / 6 * Math.PI * 2;
-    dropCoin(e.x + Math.cos(a) * 70, e.y + Math.sin(a) * 70, BOSS_COINS[game.stage] / 6);
+    dropCoin(e.x + Math.cos(a) * 70, e.y + Math.sin(a) * 70, (e.main ? BOSS_COINS : MID_COINS) / 6);
   }
   game.banner = { title: `擊敗 ${e.name}！`, sub: '', t: 0 };
 }
 
+// 過關演出結束後：一般關直接接下一關；中王後休息一下；魔王後破關
+function stageDone() {
+  if (game.sub === LAST_SUB) return endGame(true);
+  if (game.sub === MID_SUB) return openStageClear();
+  const P = game.player;
+  P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.2);
+  bankCoins();
+  startStage(game.sub + 1);
+}
+
 // 金幣來源：小怪掉落（後期怪很多，所以機率很低）＋菁英＋魔王＋存活獎勵（每 5 秒 1 枚，新手死掉也有收入）
+// 數字都是第 1 個世界的量，後面的世界會再乘上 tier.coin
 const COIN_CHANCE = 0.01;
-const BOSS_COINS = [25, 50, 75, 100, 150];   // 各關魔王掉的金幣總數
+const MID_COINS = 25, BOSS_COINS = 60;   // 中王、魔王掉的金幣總數
 const SURVIVE_SECS = 5;
 const dropCoin = (x, y, v) => game.gems.push({ x, y, v, kind: 'coin', magnet: false });
 
@@ -1674,7 +1751,7 @@ function updateFx(dt) {
 //  繪圖
 // ============================================================
 function render() {
-  const S = STAGES[game.stage || 0];
+  const S = WORLDS[game.world || 0];
   ctx.fillStyle = S.bg;
   ctx.fillRect(0, 0, W, H);
   if (!game.player) return;
@@ -2318,9 +2395,10 @@ function updateHud() {
   setText('lvl', P.lvl);
   setText('kills', game.kills);
   setText('coins', Math.floor(game.coins));
-  setText('stageLbl', `第 ${game.stage + 1} 關　${STAGES[game.stage].name}`);
-  // 倒數到魔王出現；魔王戰中顯示「魔王」
-  setText('time', game.phase === 'waves' ? fmtTime(Math.max(0, stageTime - game.st)) : game.phase === 'boss' ? '魔王' : '過關');
+  setText('stageLbl', `${stageName(game.world, game.sub)}　${WORLDS[game.world].name}`);
+  // 倒數這關剩下的時間；魔王戰中顯示「中王／魔王」
+  setText('time', game.phase === 'waves' ? fmtTime(Math.max(0, stageTime - game.st))
+    : game.phase === 'boss' ? (game.boss?.main ? '魔王' : '中王') : '過關');
   $('xpFill').style.width = (P.xp / P.xpNext * 100).toFixed(1) + '%';
   if (game.boss) $('bossFill').style.width = (Math.max(0, game.boss.hp / game.boss.maxHp) * 100).toFixed(1) + '%';
 }
@@ -2335,14 +2413,12 @@ function setBossBar(boss) {
 //  過關
 // ============================================================
 function openStageClear() {
-  const i = game.stage;
-  if (i === STAGES.length - 1) return endGame(true);
+  const w = game.world, i = game.sub;
   game.mode = 'stageclear';
   levelOpenedAt = performance.now();
   stick.id = null;
-  const N = STAGES[i + 1];
-  $('clearTitle').textContent = `第 ${i + 1} 關　${STAGES[i].name}　完成！`;
-  $('clearSub').innerHTML = `生命回復 50%<br>下一關：<b style="color:var(--ink)">第 ${i + 2} 關　${N.name}</b><br>${N.intro}`;
+  $('clearTitle').textContent = `${stageName(w, i)}　擊敗中王！`;
+  $('clearSub').innerHTML = `生命回復 50%<br>下一關：<b style="color:var(--ink)">${stageName(w, i + 1)}</b>　${stageIntro(w, i + 1)}`;
   $('clearBuild').innerHTML = buildHtml();
   showOnly('clearScreen');
 }
@@ -2352,21 +2428,34 @@ $('nextBtn').onclick = () => {
   const P = game.player;
   P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.5);
   bankCoins();
-  startStage(game.stage + 1);
+  startStage(game.sub + 1);
   game.mode = 'play';
   last = performance.now();
   showOnly(null);
 };
 
-// 標題畫面的關卡地圖：到過的關卡亮起來
-function renderStageMap() {
+// 標題畫面的世界選單：破了前一個世界才會解鎖下一個
+let pickedWorld = 0;
+function renderWorlds() {
   const prog = loadProgress();
-  $('stageMap').innerHTML = STAGES.map((S, i) =>
-    `<span class="${i < prog.reached ? 'on' : 'locked'}"><b>${i + 1}</b>${i < prog.reached ? S.name : '？？？'}</span>`).join('');
-  $('stageNote').hidden = !prog.cleared;
-  $('stageNote').textContent = `已破關 ${prog.cleared} 次`;
+  pickedWorld = clamp(prog.pick || 0, 0, prog.unlocked - 1);
+  const box = $('worldList');
+  box.innerHTML = '';
+  WORLDS.forEach((W, i) => {
+    const open = i < prog.unlocked;
+    const btn = document.createElement('button');
+    btn.className = 'world' + (i === pickedWorld ? ' picked' : '') + (open ? '' : ' locked');
+    btn.disabled = !open;
+    const status = !open ? `破了「${WORLDS[i - 1].name}」解鎖`
+      : prog.clears[i] ? `★ 已破關 ${prog.clears[i]} 次`
+      : prog.best[i] ? `最遠 ${stageName(i, prog.best[i] - 1)}` : '尚未挑戰';
+    btn.innerHTML = `<b>${i + 1}</b><span>${open ? W.name : '？？？'}</span><small>${status}</small>`;
+    btn.onclick = () => { prog.pick = i; saveProgress(prog); renderWorlds(); };
+    box.appendChild(btn);
+  });
+  $('startBtn').textContent = `出發：${WORLDS[pickedWorld].name}`;
 }
-renderStageMap();
+renderWorlds();
 
 function buildHtml() {
   const items = [
@@ -2419,15 +2508,27 @@ function endGame(win) {
   game.mode = 'over';
   $('hud').hidden = true;
   setBossBar(null);
-  const prog = loadProgress();
-  if (win) { prog.cleared++; saveProgress(prog); }
+  const prog = loadProgress(), w = game.world;
+  const unlockedNew = win && w + 1 < WORLDS.length && prog.unlocked <= w + 1;
+  if (win) {
+    prog.clears[w]++;
+    if (unlockedNew) { prog.unlocked = w + 2; prog.pick = w + 1; }
+    saveProgress(prog);
+  }
   bankCoins();
   renderOverCoins();
-  $('overTitle').textContent = win ? '天亮了' : '燈熄了';
+  $('overTitle').textContent = win ? `${WORLDS[w].name}　天亮了` : '燈熄了';
   $('overTitle').style.color = win ? 'var(--lamp)' : '';
-  $('overSub').textContent = (win ? '你穿越了五個夜晚。' : `最遠紀錄：第 ${prog.reached} 關`)
-    + `　總時間 ${fmtTime(game.t)}　最高連殺 ${game.bestCombo}`;
-  $('rStage').textContent = game.stage + 1;
+  $('overSub').innerHTML = (win
+    ? (unlockedNew ? `解鎖新世界：<b style="color:var(--lamp)">${WORLDS[w + 1].name}</b><br>` : '')
+    : `這個世界最遠到 ${stageName(w, prog.best[w] - 1)}<br>`)
+    + `總時間 ${fmtTime(game.t)}　最高連殺 ${game.bestCombo}`;
+  $('rStage').textContent = stageName(w, game.sub);
+  // 破關而且下一個世界開了：直接提供「前往下一個世界」
+  const next = win && w + 1 < prog.unlocked;
+  $('nextWorldBtn').hidden = !next;
+  if (next) $('nextWorldBtn').textContent = `前往 ${WORLDS[w + 1].name}`;
+  $('againBtn').className = next ? 'btn ghost' : 'btn';
   $('rLvl').textContent = game.player.lvl;
   $('rKills').textContent = game.kills;
   $('overBuild').innerHTML = buildHtml();
@@ -2502,12 +2603,14 @@ renderTitleCoins();
 // 關掉分頁或切到背景時，先把這局的金幣存起來
 addEventListener('pagehide', bankCoins);
 
-$('startBtn').onclick = newGame;
+$('startBtn').onclick = () => newGame(pickedWorld);
+$('nextWorldBtn').onclick = () => newGame(game.world + 1);
+$('titleBtn').onclick = () => { renderWorlds(); renderTitleCoins(); showOnly('titleScreen'); };
 const syncMute = () => { $('muteBtn').textContent = sfx.muted ? '🔇' : '🔊'; };
 $('muteBtn').onclick = () => { sfx.toggle(); syncMute(); };
 syncMute();
-$('againBtn').onclick = newGame;
-$('quitBtn').onclick = () => { game.mode = 'over'; bankCoins(); newGame(); };
+$('againBtn').onclick = () => newGame(game.world);
+$('quitBtn').onclick = () => { game.mode = 'over'; bankCoins(); newGame(game.world); };
 $('resumeBtn').onclick = togglePause;
 $('pauseBtn').onclick = togglePause;
 // 切到別的 App 或分頁時自動暫停
