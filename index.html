@@ -190,6 +190,38 @@
   .shop-item.bought { animation: shop-pop .3s ease-out; }
   @keyframes shop-pop { 50% { transform: scale(1.04); border-color: var(--lamp); } }
   .reroll { margin-top: 12px; padding: 8px 18px; font-size: .9rem; }
+
+  /* ---- 角色選擇 ---- */
+  .card.wide { max-width: 640px; max-height: calc(100dvh - 32px); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .char-list { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); margin: 0 0 16px; text-align: left; }
+  .char {
+    font: inherit; color: var(--ink); text-align: left; cursor: pointer;
+    display: grid; grid-template-columns: 56px 1fr; gap: 2px 10px; align-items: center;
+    padding: 10px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line);
+  }
+  .char canvas { grid-row: span 3; width: 56px; height: 56px; border-radius: 10px; background: rgba(255,255,255,.04); }
+  .char .name { font-weight: 700; }
+  .char .weapon { font-size: .78rem; color: var(--lamp); }
+  .char .trait { font-size: .75rem; color: var(--dim); line-height: 1.4; }
+  .char .state { grid-column: 1 / -1; margin-top: 6px; font-size: .8rem; text-align: center; padding: 5px; border-radius: 8px; background: rgba(255,255,255,.05); }
+  .char.picked { border-color: var(--lamp); background: rgba(255,200,87,.08); }
+  .char.picked .state { background: var(--lamp); color: #1a1405; font-weight: 700; }
+  .char.buy .state { color: var(--lamp); font-family: var(--font-gauge); }
+  .char.poor .state, .char.locked .state { color: var(--dim); font-family: var(--font-body); }
+  .char.locked canvas { filter: brightness(0); opacity: .5; }   /* 還沒解鎖：只看得到剪影 */
+  .char:disabled { cursor: default; }
+
+  /* ---- 存檔匯出匯入 ---- */
+  .save-code {
+    width: 100%; box-sizing: border-box; height: 72px; resize: none; margin: 0 0 8px;
+    font: 12px/1.4 var(--font-gauge); color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; padding: 8px;
+    -webkit-user-select: text; user-select: text;
+  }
+  .save-msg { min-height: 1.4em; font-size: .85rem; margin: 4px 0 12px; }
+  .save-msg.ok { color: #7dff9b; }
+  .save-msg.err { color: var(--hp); }
+  .card h3 { margin: 16px 0 6px; font-size: 1rem; }
 </style>
 </head>
 <body>
@@ -219,7 +251,11 @@
     <p class="coin-total">◆ <b id="titleCoins">0</b><small>金幣</small></p>
     <div class="btns">
       <button class="btn" id="startBtn">點燈出發</button>
+    </div>
+    <div class="btns" style="margin-top:10px">
+      <button class="btn ghost" id="charBtn">角色</button>
       <button class="btn ghost" id="titleShopBtn">強化</button>
+      <button class="btn ghost" id="saveBtn">存檔</button>
     </div>
     <div class="controls">
       <b>電腦</b>　WASD／方向鍵移動，P 暫停<br>
@@ -291,6 +327,31 @@
   </div>
 </div>
 
+<div class="overlay" id="charScreen" hidden>
+  <div class="card wide">
+    <h2>選擇角色</h2>
+    <p style="margin-bottom:6px">每個角色的起始武器和天賦都不同</p>
+    <p class="coin-total">◆ <b id="charCoins">0</b><small>金幣</small></p>
+    <div class="char-list" id="charList"></div>
+    <button class="btn" id="charBackBtn">確定</button>
+  </div>
+</div>
+
+<div class="overlay" id="saveScreen" hidden>
+  <div class="card">
+    <h2>存檔</h2>
+    <p style="margin-bottom:8px">存檔在這個瀏覽器裡。要換手機或電腦玩，<br>把存檔碼複製過去貼上就好。</p>
+    <h3>匯出</h3>
+    <textarea class="save-code" id="exportCode" readonly></textarea>
+    <button class="btn ghost" id="copyBtn">複製存檔碼</button>
+    <h3>匯入</h3>
+    <textarea class="save-code" id="importCode" placeholder="在這裡貼上存檔碼"></textarea>
+    <button class="btn ghost" id="importBtn">匯入</button>
+    <p class="save-msg" id="saveMsg"></p>
+    <button class="btn" id="saveBackBtn">返回</button>
+  </div>
+</div>
+
 <div class="overlay" id="shopScreen" hidden>
   <div class="card shop">
     <h2>燈火強化</h2>
@@ -317,7 +378,7 @@ const fmtTime = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Ma
 const MAX_ENEMIES = 650;   // 同時存在的敵人上限，保護手機效能（模擬測過 500 隻仍很輕）
 
 const canvas = $('game');
-const ctx = canvas.getContext('2d');
+let ctx = canvas.getContext('2d');   // 用 let：角色頭像會暫時換成小畫布來畫
 let W = 0, H = 0, zoom = 1;
 let hudBottom = 0;   // HUD 底部的位置（含瀏海安全區），連殺數字排在它下面
 
@@ -678,6 +739,31 @@ function saveProgress(p) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(p
 //  局外成長：打怪掉金幣，死掉也會保留；在商店買永久強化，每局開局時套用
 //  價格：base × 1.8^目前等級（四捨五入到 5）
 // ============================================================
+// ============================================================
+//  角色：起始武器、天賦、外型、解鎖條件（金幣＋破過哪個世界）
+//  look：斗篷、兜帽、下襬、燈火顏色（r,g,b）、頭飾種類
+// ============================================================
+const CHARACTERS = {
+  lantern: { name: '提燈人', weapon: 'bolt', cost: 0, trait: '經驗 +10%',
+             apply: p => { p.xpMul += 0.1; },
+             look: { cloak: '#2f3d6b', hood: '#3a4c84', hem: '#d9a441', light: '255,200,87', head: 'hood' } },
+  warden:  { name: '守墓人', weapon: 'orbit', cost: 300, trait: '生命 +40、護甲 +1、範圍 +10%、移速 -5%',
+             apply: p => { p.maxHp += 40; p.armor += 1; p.areaMul += 0.1; p.moveMul -= 0.05; },
+             look: { cloak: '#3b4a3f', hood: '#56695a', hem: '#9aa88f', light: '150,255,180', head: 'helm' } },
+  hunter:  { name: '夜獵者', weapon: 'blade', cost: 400, trait: '移速 +15%、拾取範圍 +40%、生命 -10',
+             apply: p => { p.moveMul += 0.15; p.pickup *= 1.4; p.maxHp -= 10; },
+             look: { cloak: '#5a3a2a', hood: '#6e4a35', hem: '#c98b4f', light: '255,170,110', head: 'cap' } },
+  storm:   { name: '雷巫', weapon: 'chain', cost: 500, need: 0, trait: '攻擊冷卻 -12%、生命 -20',
+             apply: p => { p.cdMul *= 0.88; p.maxHp -= 20; },
+             look: { cloak: '#3d2d63', hood: '#52408a', hem: '#9fd0ff', light: '160,200,255', head: 'hat' } },
+  alchemist: { name: '煉金師', weapon: 'flask', cost: 600, need: 1, trait: '攻擊範圍 +20%、經驗 +10%',
+             apply: p => { p.areaMul += 0.2; p.xpMul += 0.1; },
+             look: { cloak: '#5c2f3a', hood: '#723c4a', hem: '#e07a5f', light: '255,130,160', head: 'goggles' } },
+  nun:     { name: '晨曦修女', weapon: 'pulse', cost: 800, need: 2, trait: '每秒回復 0.8、生命 +10、傷害 -10%',
+             apply: p => { p.regen += 0.8; p.maxHp += 10; p.dmgMul -= 0.1; },
+             look: { cloak: '#cfc8b8', hood: '#ece6d6', hem: '#ffc857', light: '255,240,200', head: 'veil' } },
+};
+
 const META_UPS = {
   hp:     { name: '體魄', icon: '♥', max: 5, base: 30,  desc: lv => `最大生命 +${10 * lv}`,      apply: (p, lv) => { p.maxHp += 10 * lv; } },
   might:  { name: '鋒芒', icon: '✶', max: 5, base: 40,  desc: lv => `所有傷害 +${5 * lv}%`,     apply: (p, lv) => { p.dmgMul += 0.05 * lv; } },
@@ -694,9 +780,10 @@ const META_UPS = {
 const metaCost = (U, lv) => Math.round(U.base * 1.8 ** lv / 5) * 5;
 
 const META_KEY = 'shadowtide-meta';
+const blankMeta = () => ({ coins: 0, ups: {}, chars: ['lantern'], char: 'lantern' });
 function loadMeta() {
-  try { return { coins: 0, ups: {}, ...JSON.parse(localStorage.getItem(META_KEY) || '{}') }; }
-  catch (_) { return { coins: 0, ups: {} }; }
+  try { return { ...blankMeta(), ...JSON.parse(localStorage.getItem(META_KEY) || '{}') }; }
+  catch (_) { return blankMeta(); }
 }
 function saveMeta() { try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (_) {} }
 const meta = loadMeta();
@@ -745,11 +832,14 @@ function newGame(world = game.world || 0) {
     frenzyT: 0, shieldT: 0, armor: 0, coinMul: 1, rerolls: 0, revives: 0,
     lvl: 1, xp: 0, xpNext: xpNeed(1), faceX: 1, faceY: 0,
   };
-  // 套用商店買的永久強化
+  // 套用角色天賦和商店買的永久強化
+  const C = CHARACTERS[meta.char] || CHARACTERS.lantern;
+  game.player.look = C.look;
+  C.apply(game.player);
   for (const [id, U] of Object.entries(META_UPS)) if (meta.ups[id]) U.apply(game.player, meta.ups[id]);
   game.player.coinMul *= WORLDS[world].tier.coin;   // 越難的世界金幣越多
   game.player.hp = game.player.maxHp;
-  addWeapon('bolt');
+  addWeapon(C.weapon);
   if (debug) {
     for (const id of ['bolt', 'orbit', 'pulse']) while ((game.weapons.find(w => w.id === id)?.lv || 0) < WEAPONS[id].max) addWeapon(id);
     for (const id of ['focus', 'vigor', 'might']) { game.passives[id] = 1; PASSIVES[id].apply(game.player); }
@@ -2239,7 +2329,8 @@ const ENEMY_SHAPES = {
 // 提燈旅人：深藍斗篷＋兜帽，手上提著燈籠
 // 原點在角色腳底中心偏上（P.x, P.y），整個角色大約 28 寬、36 高，碰撞半徑仍是 P.r
 function drawPlayer(P) {
-  const t = game.t;
+  const t = game.t || 0;
+  const L = P.look || CHARACTERS.lantern.look;
   // 面向：依水平移動方向左右翻轉，垂直移動時維持上一次的方向
   if (P.faceX > 0.15) P.dir = 1; else if (P.faceX < -0.15) P.dir = -1;
   const dir = P.dir || 1;
@@ -2256,7 +2347,7 @@ function drawPlayer(P) {
   ctx.scale(dir, 1);
 
   // 斗篷身體：上窄下寬，下襬隨步伐左右擺
-  ctx.fillStyle = '#2f3d6b';
+  ctx.fillStyle = L.cloak;
   ctx.beginPath();
   ctx.moveTo(-6, -9);
   ctx.quadraticCurveTo(-13, 2, -12 + sway, 12);
@@ -2265,7 +2356,7 @@ function drawPlayer(P) {
   ctx.closePath();
   ctx.fill();
   // 下襬金邊
-  ctx.strokeStyle = '#d9a441'; ctx.lineWidth = 1.8;
+  ctx.strokeStyle = L.hem; ctx.lineWidth = 1.8;
   ctx.beginPath();
   ctx.moveTo(-12 + sway, 12); ctx.quadraticCurveTo(0, 15, 12 + sway, 12);
   ctx.stroke();
@@ -2273,11 +2364,13 @@ function drawPlayer(P) {
   ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1.2;
   ctx.beginPath(); ctx.moveTo(1, -6); ctx.lineTo(2 + sway * 0.4, 13); ctx.stroke();
 
-  // 兜帽：往後拖一個尖角
-  ctx.fillStyle = '#3a4c84';
-  ctx.beginPath();
-  ctx.moveTo(-6, -19); ctx.quadraticCurveTo(-13, -17, -12 - sway * 0.3, -9);
-  ctx.lineTo(-4, -12); ctx.closePath(); ctx.fill();
+  // 兜帽：往後拖一個尖角（戴頭盔的守墓人沒有尖角）
+  ctx.fillStyle = L.hood;
+  if (L.head !== 'helm') {
+    ctx.beginPath();
+    ctx.moveTo(-6, -19); ctx.quadraticCurveTo(-13, -17, -12 - sway * 0.3, -9);
+    ctx.lineTo(-4, -12); ctx.closePath(); ctx.fill();
+  }
   ctx.beginPath(); ctx.arc(0, -13, 9, 0, Math.PI * 2); ctx.fill();
   // 兜帽裡的暗臉，只露出兩點暖光眼睛
   ctx.fillStyle = '#100d1a';
@@ -2287,9 +2380,10 @@ function drawPlayer(P) {
   ctx.arc(2.2, -12.5, 1.3, 0, Math.PI * 2);
   ctx.arc(5.6, -12.5, 1.3, 0, Math.PI * 2);
   ctx.fill();
+  drawHeadgear(L, sway);
 
   // 提燈的手臂與燈桿
-  ctx.strokeStyle = '#2f3d6b'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
+  ctx.strokeStyle = L.cloak; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(5, -4); ctx.lineTo(11, -2); ctx.stroke();
   ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(10, -1); ctx.lineTo(16, -9); ctx.stroke();
@@ -2303,7 +2397,7 @@ function drawPlayer(P) {
   ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, 3); ctx.stroke();
   ctx.fillStyle = '#8a5a1c';
   ctx.fillRect(-3.5, 3, 7, 2);                 // 燈蓋
-  ctx.fillStyle = '#ffc857';
+  ctx.fillStyle = `rgb(${L.light})`;
   ctx.beginPath(); ctx.roundRect(-3.5, 5, 7, 8, 2); ctx.fill();
   ctx.fillStyle = '#fff6d6';
   ctx.beginPath(); ctx.ellipse(0, 9, 1.6, 2.6, 0, 0, Math.PI * 2); ctx.fill();   // 火芯
@@ -2316,8 +2410,8 @@ function drawPlayer(P) {
   // 燈籠的光暈：疊加混色，照亮周圍
   const lx = P.x + dir * 16, ly = P.y - bob;
   const glow = ctx.createRadialGradient(lx, ly, 2, lx, ly, 70);
-  glow.addColorStop(0, 'rgba(255,200,87,.35)');
-  glow.addColorStop(1, 'rgba(255,200,87,0)');
+  glow.addColorStop(0, `rgba(${L.light},.35)`);
+  glow.addColorStop(1, `rgba(${L.light},0)`);
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.fillStyle = glow;
@@ -2326,6 +2420,54 @@ function drawPlayer(P) {
 }
 
 // 地面：用格子座標做固定的偽隨機，讓裝飾位置每次經過都一樣；每關換一種裝飾
+// 頭飾：讓每個角色的剪影不一樣（座標系和 drawPlayer 一樣，臉朝 +x）
+function drawHeadgear(L, sway) {
+  if (L.head === 'helm') {
+    // 守墓人：圓頂頭盔＋頭頂冠飾＋面罩橫條
+    ctx.fillStyle = L.hem;
+    ctx.beginPath(); ctx.arc(0, -14, 9.5, Math.PI, 0); ctx.fill();
+    ctx.fillRect(-1.5, -26, 3, 5);
+    ctx.fillStyle = L.hood;
+    ctx.fillRect(-1, -15.5, 9.5, 1.8);
+  } else if (L.head === 'cap') {
+    // 夜獵者：兜帽上插一根往後飄的羽毛
+    ctx.strokeStyle = L.hem; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-3, -20); ctx.quadraticCurveTo(-10, -28, -16 - sway, -24); ctx.stroke();
+    ctx.lineCap = 'butt';
+  } else if (L.head === 'hat') {
+    // 雷巫：寬帽簷尖帽，帽尖往後彎
+    ctx.fillStyle = L.hood;
+    ctx.beginPath(); ctx.ellipse(0, -19, 13, 3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-7, -20); ctx.quadraticCurveTo(-2, -32, -10 - sway * 0.5, -36); ctx.lineTo(7, -20); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = L.hem;
+    ctx.fillRect(-6.5, -22, 13, 2);
+  } else if (L.head === 'goggles') {
+    // 煉金師：額頭上推著一副護目鏡
+    ctx.fillStyle = '#8a6a3a';
+    ctx.fillRect(-7, -20, 14, 2.2);
+    ctx.fillStyle = L.hem;
+    ctx.beginPath(); ctx.arc(2.5, -20, 2.6, 0, Math.PI * 2); ctx.arc(7, -20, 2.6, 0, Math.PI * 2); ctx.fill();
+  } else if (L.head === 'veil') {
+    // 晨曦修女：頭頂一圈光環
+    ctx.strokeStyle = `rgba(${L.light},.9)`; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.ellipse(0, -25, 7, 2.2, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+}
+
+// 角色頭像：把 drawPlayer 暫時畫到小畫布上
+function drawPortrait(cv, id) {
+  const c = cv.getContext && cv.getContext('2d');
+  if (!c) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  cv.width = 56 * dpr; cv.height = 56 * dpr;
+  const main = ctx;
+  ctx = c;
+  try {
+    ctx.setTransform(dpr * 1.6, 0, 0, dpr * 1.6, 28 * dpr, 34 * dpr);
+    drawPlayer({ x: 0, y: 0, faceX: 1, moving: false, dir: 1, look: CHARACTERS[id].look });
+  } finally { ctx = main; }
+}
+
 function drawGround(P, S) {
   const T = 90, R = viewRadius() + T;
   const x0 = Math.floor((P.x - R) / T), x1 = Math.floor((P.x + R) / T);
@@ -2385,7 +2527,7 @@ const DECOR = {
 // ============================================================
 //  介面
 // ============================================================
-const SCREENS = ['titleScreen', 'levelScreen', 'chestScreen', 'clearScreen', 'pauseScreen', 'overScreen', 'shopScreen'];
+const SCREENS = ['titleScreen', 'levelScreen', 'chestScreen', 'clearScreen', 'pauseScreen', 'overScreen', 'shopScreen', 'charScreen', 'saveScreen'];
 function showOnly(id) { for (const s of SCREENS) $(s).hidden = s !== id; }
 
 const hudCache = {};
@@ -2536,6 +2678,112 @@ function endGame(win) {
 }
 
 // ============================================================
+//  角色選擇：已解鎖的點了就選；沒解鎖的顯示價格或條件
+// ============================================================
+function openChars() {
+  renderChars();
+  showOnly('charScreen');
+  $('charScreen').firstElementChild.scrollTop = 0;
+}
+
+function renderChars() {
+  $('charCoins').textContent = meta.coins;
+  const prog = loadProgress(), box = $('charList');
+  box.innerHTML = '';
+  for (const [id, C] of Object.entries(CHARACTERS)) {
+    const owned = meta.chars.includes(id);
+    const gated = C.need !== undefined && !prog.clears[C.need];
+    const W_ = WEAPONS[C.weapon];
+    const btn = document.createElement('button');
+    let state, cls;
+    if (id === meta.char) { state = '使用中'; cls = 'picked'; }
+    else if (owned) { state = '選擇'; cls = ''; }
+    else if (gated) { state = `🔒 破了「${WORLDS[C.need].name}」才能解鎖`; cls = 'locked'; }
+    else { state = `解鎖 ◆ ${C.cost}`; cls = meta.coins >= C.cost ? 'buy' : 'buy poor'; }
+    btn.className = 'char ' + cls;
+    btn.disabled = gated && !owned || (!owned && meta.coins < C.cost);
+    btn.innerHTML = `<canvas></canvas>
+      <span class="name">${owned || !gated ? C.name : '？？？'}</span>
+      <span class="weapon">${W_.icon} ${W_.name}</span>
+      <span class="trait">${C.trait}</span>
+      <span class="state">${state}</span>`;
+    btn.onclick = () => {
+      if (!owned) {
+        if (btn.disabled) return;
+        meta.coins -= C.cost;
+        meta.chars.push(id);
+        sfx.init(); sfx.chest();
+      }
+      meta.char = id;
+      saveMeta();
+      renderChars();
+    };
+    box.appendChild(btn);
+    drawPortrait(btn.querySelector ? btn.querySelector('canvas') : {}, id);
+  }
+}
+$('charBtn').onclick = openChars;
+$('charBackBtn').onclick = () => { renderTitle(); showOnly('titleScreen'); };
+
+// ============================================================
+//  存檔匯出／匯入：把兩份存檔打包成一串文字（前面加 ST1. 當版本號）
+// ============================================================
+const SAVE_PREFIX = 'ST1.';
+function exportSave() {
+  const json = JSON.stringify({ w: loadProgress(), m: meta });
+  return SAVE_PREFIX + btoa(unescape(encodeURIComponent(json)));
+}
+function importSave(code) {
+  code = code.trim().replace(/\s+/g, '');
+  if (!code.startsWith(SAVE_PREFIX)) throw new Error('這不是影潮的存檔碼');
+  let data;
+  try { data = JSON.parse(decodeURIComponent(escape(atob(code.slice(SAVE_PREFIX.length))))); }
+  catch (_) { throw new Error('存檔碼不完整，請確認有整串複製'); }
+  const { w, m } = data || {};
+  if (!w || !m || typeof m.coins !== 'number' || typeof w.unlocked !== 'number') throw new Error('存檔碼內容有問題');
+  saveProgress({ ...loadProgress(), ...w });
+  for (const k of Object.keys(meta)) delete meta[k];
+  Object.assign(meta, blankMeta(), m);
+  if (!meta.chars.includes('lantern')) meta.chars.unshift('lantern');
+  saveMeta();
+}
+
+let importArmed = false;
+function setSaveMsg(text, cls = '') { $('saveMsg').textContent = text; $('saveMsg').className = 'save-msg ' + cls; }
+$('saveBtn').onclick = () => {
+  importArmed = false;
+  $('exportCode').value = exportSave();
+  $('importCode').value = '';
+  $('importBtn').textContent = '匯入';
+  setSaveMsg('');
+  showOnly('saveScreen');
+};
+$('copyBtn').onclick = async () => {
+  const code = $('exportCode').value;
+  try { await navigator.clipboard.writeText(code); }
+  catch (_) { $('exportCode').select(); document.execCommand && document.execCommand('copy'); }
+  setSaveMsg('已複製！貼到另一台裝置的「匯入」就可以了', 'ok');
+};
+// 匯入會覆蓋目前存檔：第一次按先提醒，再按一次才執行
+$('importBtn').onclick = () => {
+  const code = $('importCode').value;
+  if (!code.trim()) return setSaveMsg('請先貼上存檔碼', 'err');
+  if (!importArmed) {
+    importArmed = true;
+    $('importBtn').textContent = '確定覆蓋目前的存檔？';
+    return setSaveMsg('匯入後，這台裝置原本的存檔會被取代', 'err');
+  }
+  importArmed = false;
+  $('importBtn').textContent = '匯入';
+  try {
+    importSave(code);
+    $('exportCode').value = exportSave();
+    setSaveMsg(`匯入成功！金幣 ${meta.coins}、已解鎖 ${loadProgress().unlocked} 個世界`, 'ok');
+  } catch (err) { setSaveMsg(err.message, 'err'); }
+};
+$('saveBackBtn').onclick = () => { renderTitle(); showOnly('titleScreen'); };
+
+// ============================================================
 //  強化商店
 // ============================================================
 let shopFrom = 'titleScreen', refundArmed = false;
@@ -2589,23 +2837,24 @@ $('refundBtn').onclick = () => {
   renderShop();
 };
 $('shopBackBtn').onclick = () => {
-  renderTitleCoins();
+  renderTitle();
   if (shopFrom === 'overScreen') renderOverCoins();
   showOnly(shopFrom);
 };
 $('titleShopBtn').onclick = () => openShop('titleScreen');
 $('overShopBtn').onclick = () => openShop('overScreen');
 const renderTitleCoins = () => { $('titleCoins').textContent = meta.coins; };
+const renderTitle = () => { renderWorlds(); renderTitleCoins(); $('charBtn').textContent = `角色：${CHARACTERS[meta.char].name}`; };
 const renderOverCoins = () => {
   $('overCoins').innerHTML = `本局獲得 ◆ <b>${game.coinsBanked}</b><small>（含存活獎勵 ${game.surviveBonus}）　共 ${meta.coins}</small>`;
 };
-renderTitleCoins();
+renderTitle();
 // 關掉分頁或切到背景時，先把這局的金幣存起來
 addEventListener('pagehide', bankCoins);
 
 $('startBtn').onclick = () => newGame(pickedWorld);
 $('nextWorldBtn').onclick = () => newGame(game.world + 1);
-$('titleBtn').onclick = () => { renderWorlds(); renderTitleCoins(); showOnly('titleScreen'); };
+$('titleBtn').onclick = () => { renderTitle(); showOnly('titleScreen'); };
 const syncMute = () => { $('muteBtn').textContent = sfx.muted ? '🔇' : '🔊'; };
 $('muteBtn').onclick = () => { sfx.toggle(); syncMute(); };
 syncMute();

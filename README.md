@@ -5,7 +5,7 @@
 - 電腦：WASD／方向鍵移動，P 暫停，升級時按 1/2/3 選擇、R 重抽
 - 手機：按住畫面任一處拖曳（浮動搖桿）
 
-每局撿到的金幣死掉也會保留，可以在「強化」商店買永久升級（生命、傷害、護甲、重抽、復活…）。
+每局撿到的金幣死掉也會保留，可以在「強化」商店買永久升級（生命、傷害、護甲、重抽、復活…），或解鎖新角色。六個角色的起始武器和天賦都不同。
 
 單一 `index.html`，純 Canvas，不需要建置工具。直接用瀏覽器打開即可。
 
@@ -23,9 +23,11 @@
 | `rollChoices` | 升級三選一的抽選規則 |
 | `EVOLUTIONS` / `openChest` | 武器進化配方與寶箱（6 把武器、6 種進化） |
 | `MAX_WEAPONS` / `MAX_PASSIVES` | 欄位上限：武器 4 把、被動 5 種 |
+| `CHARACTERS` / `renderChars` | 六個角色：起始武器、天賦、外型（`look`、`drawHeadgear`）、解鎖條件 |
+| `exportSave` / `importSave` | 存檔匯出／匯入（`ST1.` 開頭的存檔碼） |
 | `META_UPS` / `metaCost` | 局外成長：金幣商店的永久強化與價格 |
 | `COIN_CHANCE` / `BOSS_COINS` / `SURVIVE_SECS` | 金幣來源：小怪掉落、魔王、存活獎勵 |
 
 測試：網址後面加 `?debug`，開局就有滿級武器與配方被動、每關 20 秒、魔王血量 3 成；加 `?debug&world=2&stage=3` 從 2-3 開始。
 
-存檔在瀏覽器的 localStorage：`shadowtide-worlds`（世界解鎖與最遠關卡）、`shadowtide-meta`（金幣與商店強化）。
+存檔在瀏覽器的 localStorage：`shadowtide-worlds`（世界解鎖與最遠關卡）、`shadowtide-meta`（金幣、商店強化、已解鎖角色）。標題畫面的「存檔」可以匯出成一串存檔碼，貼到別的裝置匯入。
