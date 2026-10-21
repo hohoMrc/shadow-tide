@@ -1772,7 +1772,8 @@ function openChest() {
   game.starterChest = false;
   const fresh = Object.keys(WEAPONS).filter(id => !WEAPONS[id].evolved
     && !game.weapons.some(w => w.id === id || w.id === EVOLUTIONS.find(r => r.from === id)?.into));
-  if (starter && fresh.length) {
+  // 武器欄已經滿了（開局寶箱放著沒撿、先升級拿滿 4 把）就不再塞新武器，改成一般寶箱
+  if (starter && fresh.length && game.weapons.length < MAX_WEAPONS) {
     const id = fresh[Math.floor(Math.random() * fresh.length)];
     addWeapon(id);
     const D = WEAPONS[id];
