@@ -103,6 +103,8 @@
     background: var(--lamp); color: #1a1405;
   }
   .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  /* 手把選到的按鈕 */
+  .pad-focus { outline: 3px solid var(--lamp) !important; outline-offset: 3px; }
   .btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
   .controls { font-size: .9rem; color: var(--dim); margin-top: 18px; line-height: 1.8; }
   .controls b { color: var(--ink); font-weight: 500; }
@@ -264,7 +266,7 @@
     </div>
     <div class="controls">
       <b>電腦</b>　WASD／方向鍵移動，P 暫停<br>
-      <b>手機</b>　按住畫面任一處拖曳移動<br>
+      <b>手機</b>　按住畫面任一處拖曳移動<br>      <b>手把</b>　左搖桿移動，Start 暫停，A 確認，B 返回<br>
       攻擊全自動 · 撿光晶升級 · 三選一打造流派
     </div>
   </div>
@@ -452,6 +454,7 @@ function readMove() {
   if (keys.has('d') || keys.has('arrowright')) x += 1;
   if (keys.has('w') || keys.has('arrowup')) y -= 1;
   if (keys.has('s') || keys.has('arrowdown')) y += 1;
+  if (pad.x || pad.y) { x = pad.x; y = pad.y; }
   if (stick.id !== null) {
     const dx = stick.x - stick.ox, dy = stick.y - stick.oy;
     const d = Math.hypot(dx, dy);
@@ -459,6 +462,139 @@ function readMove() {
   }
   const len = Math.hypot(x, y);
   return len > 1 ? { x: x / len, y: y / len } : { x, y };
+}
+
+// ============================================================
+//  手把（Gamepad API）：每一幀輪詢一次
+//  遊戲中：左搖桿／十字鍵移動，Start 暫停
+//  選單中：搖桿／十字鍵移動焦點，A 確認，B 返回，X 重抽
+// ============================================================
+const pad = { x: 0, y: 0, prev: [], navT: 0, navDir: '', active: false };
+const PAD_DEAD = 0.2;
+// 標準配置的按鈕編號
+const PB = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, SELECT: 8, START: 9, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 };
+// 各畫面按 B 時要按的按鈕，以及剛打開時預設的焦點
+const PAD_BACK = { charScreen: 'charBackBtn', saveScreen: 'saveBackBtn', shopScreen: 'shopBackBtn', pauseScreen: 'resumeBtn' };
+const PAD_HOME = {
+  titleScreen: 'startBtn', chestScreen: 'chestBtn', clearScreen: 'nextBtn', pauseScreen: 'resumeBtn',
+  overScreen: () => $('nextWorldBtn').hidden ? 'againBtn' : 'nextWorldBtn', saveScreen: 'saveBackBtn',
+};
+let padScreen = null, padFocus = null;
+
+// 只把手把用的焦點框畫出來；滑鼠或手指一碰畫面就收起來
+addEventListener('pointerdown', () => { pad.active = false; setPadFocus(null); }, true);
+addEventListener('gamepadconnected', () => { pad.active = true; });
+
+function openScreen() { return SCREENS.find(s => !$(s).hidden) || null; }
+// 目前畫面上可以選的東西：看得到的按鈕和音量滑桿（文字框手把打不了字，跳過）
+// 停用的按鈕（買不起的強化）也能移過去看說明，只是按了沒反應
+function padTargets(screen) {
+  return [...$(screen).querySelectorAll('button, input[type=range]')]
+    .filter(el => el.offsetParent !== null && !el.closest('[hidden]'));
+}
+function setPadFocus(el) {
+  if (padFocus) padFocus.classList.remove('pad-focus');
+  padFocus = el;
+  if (!el) return;
+  el.classList.add('pad-focus');
+  el.focus({ preventScroll: true });
+  el.scrollIntoView({ block: 'nearest' });   // 長清單（商店、暫停）跟著捲動
+}
+function padHome(screen) {
+  const list = padTargets(screen);
+  let id = PAD_HOME[screen];
+  if (typeof id === 'function') id = id();
+  return (id && list.find(el => el.id === id)) || list[0] || null;
+}
+// 空間導航：往指定方向找最近的目標（主方向距離為主，偏離的方向加重懲罰）
+function padMove(screen, dir) {
+  const list = padTargets(screen);
+  if (!padFocus || !list.includes(padFocus)) return setPadFocus(padHome(screen));
+  const a = padFocus.getBoundingClientRect();
+  const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+  let best = null, bestScore = Infinity;
+  for (const el of list) {
+    if (el === padFocus) continue;
+    const b = el.getBoundingClientRect();
+    const dx = b.left + b.width / 2 - ax, dy = b.top + b.height / 2 - ay;
+    const main = { left: -dx, right: dx, up: -dy, down: dy }[dir];
+    if (main <= 4) continue;
+    // 側向距離用「兩個框之間的空隙」，有重疊就算 0
+    // 左右：盡量留在同一列；上下：先找最近的一列，再找那一列裡最靠近的
+    const horiz = dir === 'left' || dir === 'right';
+    const side = horiz
+      ? Math.max(0, b.top - a.bottom, a.top - b.bottom)
+      : Math.max(0, b.left - a.right, a.left - b.right);
+    const score = main + side * (horiz ? 8 : 0.5);
+    if (score < bestScore) { bestScore = score; best = el; }
+  }
+  if (best) setPadFocus(best);
+}
+// 按下目前焦點；如果按完畫面重畫了（例如選世界、買強化），焦點留在同一個位置
+function padPress(screen) {
+  const el = padFocus;
+  if (!el || !el.isConnected) return;
+  const parent = el.parentElement, idx = [...parent.children].indexOf(el);
+  el.click();
+  if (!el.isConnected && parent.isConnected && parent.children[idx]) setPadFocus(parent.children[idx]);
+}
+// 音量滑桿：左右鍵直接調整數值
+function padSlide(el, dir) {
+  el.value = clamp(Number(el.value) + (dir === 'right' ? 10 : -10), Number(el.min), Number(el.max));
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function pollPad(dt) {
+  const gp = navigator.getGamepads ? [...navigator.getGamepads()].find(g => g && g.connected) : null;
+  if (!gp) { pad.x = pad.y = 0; return; }
+  const btn = i => !!(gp.buttons[i] && gp.buttons[i].pressed);
+  const now = gp.buttons.map(b => b.pressed), prev = pad.prev;
+  const hit = i => now[i] && !prev[i];   // 這一幀才按下去
+  pad.prev = now;
+
+  // 左搖桿（圓形死區）＋ 十字鍵
+  let x = gp.axes[0] || 0, y = gp.axes[1] || 0;
+  const len = Math.hypot(x, y);
+  if (len < PAD_DEAD) x = y = 0;
+  else { const k = Math.min(1, (len - PAD_DEAD) / (1 - PAD_DEAD)) / len; x *= k; y *= k; }
+  if (btn(PB.LEFT)) x = -1;
+  if (btn(PB.RIGHT)) x = 1;
+  if (btn(PB.UP)) y = -1;
+  if (btn(PB.DOWN)) y = 1;
+  if (now.some(Boolean) || x || y) pad.active = true;
+
+  const screen = openScreen();
+  if (!screen) {
+    // 遊戲中
+    pad.x = x; pad.y = y;
+    if (game.mode === 'play' && (hit(PB.START) || hit(PB.SELECT))) togglePause();
+    if (padFocus) setPadFocus(null);
+    padScreen = null;
+    return;
+  }
+  pad.x = pad.y = 0;
+  if (!pad.active) return;
+
+  // 換了畫面：焦點放到預設按鈕
+  if (screen !== padScreen || !padFocus || !padFocus.isConnected) {
+    padScreen = screen;
+    setPadFocus(screen === 'levelScreen' ? padTargets(screen)[0] : padHome(screen));
+  }
+
+  // 方向：按下立刻移動一格，按住 0.35 秒後每 0.12 秒連續移動
+  const dir = Math.abs(x) > 0.5 || Math.abs(y) > 0.5
+    ? (Math.abs(x) > Math.abs(y) ? (x > 0 ? 'right' : 'left') : (y > 0 ? 'down' : 'up')) : '';
+  if (dir !== pad.navDir) { pad.navDir = dir; pad.navT = 0.35; if (dir) padNav(screen, dir); }
+  else if (dir && (pad.navT -= dt) <= 0) { pad.navT = 0.12; padNav(screen, dir); }
+
+  if (hit(PB.A)) { sfx.init(); padPress(screen); }
+  if (hit(PB.B) && PAD_BACK[screen]) $(PAD_BACK[screen]).click();
+  if (hit(PB.START) && screen === 'pauseScreen') togglePause();
+  if (hit(PB.X) && screen === 'levelScreen') $('rerollBtn').click();
+}
+function padNav(screen, dir) {
+  if (padFocus && padFocus.type === 'range' && (dir === 'left' || dir === 'right')) return padSlide(padFocus, dir);
+  padMove(screen, dir);
 }
 
 // ============================================================
@@ -1175,6 +1311,7 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05);   // 切回分頁時不要一次跳太多
   last = now;
+  pollPad(dt);
   if (game.mode === 'play') update(dt);
   updateMusic();
   render();
